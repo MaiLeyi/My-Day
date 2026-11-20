@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Folder, Project, Scope, StatusFilter, Task } from '../types'
 import { download, today } from '../utils'
 import { api } from '../api'
+import Modal from './Modal'
 
 interface Props {
   tasks: Task[]
@@ -107,73 +108,68 @@ export default function ExportModal(props: Props) {
   }
 
   return (
-    <>
-      <div className="mask" onClick={props.onClose} />
-      <div className="modal sm">
-        <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-          <div className="d-head">
-            <h3>导出事项</h3>
-            <button className="d-close" onClick={props.onClose}>
-              ×
-            </button>
-          </div>
-          <div className="exp-hint">
-            导出状态：{[...statuses].map((s) => EXP_STATUS[s]).join('、')}（可勾选调整，再逐条增减）
-          </div>
-          <div className="exp-filters">
-            {Object.entries(EXP_STATUS).map(([key, label]) => (
-              <label key={key}>
-                <input
-                  type="checkbox"
-                  checked={statuses.has(key)}
-                  onChange={(e) => toggleStatus(key, e.target.checked)}
-                />
-                {label}
-              </label>
-            ))}
-          </div>
-          <div className="exp-bar">
-            <label className="exp-all">
-              <input
-                type="checkbox"
-                checked={allChecked}
-                onChange={(e) => setPicked(e.target.checked ? new Set(candidates.map((t) => t.id)) : new Set())}
-              />
-              全选
-            </label>
-            <select id="expFmt" value={format} onChange={(e) => setFormat(e.target.value as 'json' | 'csv')}>
-              <option value="json">JSON</option>
-              <option value="csv">Excel（CSV）</option>
-            </select>
-          </div>
-          <div className="exp-list">
-            {candidates.map((t) => {
-              const project = props.projects.find((p) => p.id === t.projectId)
-              const folder = props.folders.find((f) => f.id === t.folderId)
-              return (
-                <label className="exp-item" key={t.id}>
-                  <input type="checkbox" checked={checked.has(t.id)} onChange={() => toggleItem(t.id)} />
-                  <span style={{ flex: 1 }}>{t.title}</span>
-                  <span className="meta">
-                    {project?.name || ''}
-                    {folder ? ' · ' + folder.name : ''}
-                    {t.planDate ? ' · ' + t.planDate : ''}
-                  </span>
-                </label>
-              )
-            })}
-            {candidates.length === 0 && <div className="ai-empty">当前筛选下没有可导出的事项</div>}
-          </div>
-          <div className="d-foot">
-            <button className="btn btn-ghost" onClick={props.onClose}>
-              取消
-            </button>
-            <button className="btn btn-pri" onClick={doExport}>
-              导出 {checked.size} 条
-            </button>
-          </div>
-        </div>
+    <Modal size="sm" onClose={props.onClose}>
+      <div className="d-head">
+        <h3>导出事项</h3>
+        <button className="d-close" onClick={props.onClose}>
+          ×
+        </button>
       </div>
-    </>
+      <div className="exp-hint">
+        导出状态：{[...statuses].map((s) => EXP_STATUS[s]).join('、')}（可勾选调整，再逐条增减）
+      </div>
+      <div className="exp-filters">
+        {Object.entries(EXP_STATUS).map(([key, label]) => (
+          <label key={key}>
+            <input
+              type="checkbox"
+              checked={statuses.has(key)}
+              onChange={(e) => toggleStatus(key, e.target.checked)}
+            />
+            {label}
+          </label>
+        ))}
+      </div>
+      <div className="exp-bar">
+        <label className="exp-all">
+          <input
+            type="checkbox"
+            checked={allChecked}
+            onChange={(e) => setPicked(e.target.checked ? new Set(candidates.map((t) => t.id)) : new Set())}
+          />
+          全选
+        </label>
+        <select id="expFmt" value={format} onChange={(e) => setFormat(e.target.value as 'json' | 'csv')}>
+          <option value="json">JSON</option>
+          <option value="csv">Excel（CSV）</option>
+        </select>
+      </div>
+      <div className="exp-list">
+        {candidates.map((t) => {
+          const project = props.projects.find((p) => p.id === t.projectId)
+          const folder = props.folders.find((f) => f.id === t.folderId)
+          return (
+            <label className="exp-item" key={t.id}>
+              <input type="checkbox" checked={checked.has(t.id)} onChange={() => toggleItem(t.id)} />
+              <span style={{ flex: 1 }}>{t.title}</span>
+              <span className="meta">
+                {project?.name || ''}
+                {folder ? ' · ' + folder.name : ''}
+                {t.planDate ? ' · ' + t.planDate : ''}
+              </span>
+            </label>
+          )
+        })}
+        {candidates.length === 0 && <div className="ai-empty">当前筛选下没有可导出的事项</div>}
+      </div>
+      <div className="d-foot">
+        <button className="btn btn-ghost" onClick={props.onClose}>
+          取消
+        </button>
+        <button className="btn btn-pri" onClick={doExport}>
+          导出 {checked.size} 条
+        </button>
+      </div>
+    </Modal>
   )
 }

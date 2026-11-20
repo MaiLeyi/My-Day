@@ -23,6 +23,17 @@ export interface Folder {
 export interface Attachment {
   name: string
   size: number
+  fileId?: string
+  url?: string
+  mime?: string
+}
+
+export interface UploadedFile {
+  id: string
+  name: string
+  size: number
+  mime: string
+  url: string
 }
 
 export interface Task {
@@ -102,4 +113,4 @@ export interface AiContext {
   projectSplit: boolean
 }
 
-export type StatusFilter = 'todo' | 'doing' | 'done' | 'unplanned'
+export type StatusFilter = 'all' | 'todo' | 'doing' | 'done' | 'unplanned'

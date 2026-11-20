@@ -12,6 +12,9 @@ Priority = Literal["", "high", "mid", "low"]
 class Attachment(BaseModel):
     name: str
     size: int = 0
+    fileId: str = ""
+    url: str = ""
+    mime: str = ""
 
 
 class TaskBase(BaseModel):

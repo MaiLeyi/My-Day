@@ -4,9 +4,13 @@ from __future__ import annotations
 import json
 import csv
 import io
+import re
+import secrets
+from datetime import datetime
+from pathlib import Path
 from typing import Any
 
-from .db import connect, now_iso, DEFAULT_SETTINGS
+from .db import connect, now_iso, DEFAULT_SETTINGS, DB_PATH
 from .models import (
     TaskCreate,
     TaskUpdate,
@@ -20,10 +24,12 @@ from .models import (
 PRIORITY_LABEL = {"high": "高", "mid": "中", "low": "低", "": "无"}
 STATUS_LABEL = {"todo": "待办", "doing": "进行中", "done": "已完成"}
 
+# 附件文件统一放在数据库同级的 files 目录，便于整体备份/迁移
+FILES_DIR = DB_PATH.parent / "files"
+FILE_URL_RE = re.compile(r"/api/files/([A-Za-z0-9_-]+)")
+
 
 def _uid(prefix: str) -> str:
-    import secrets
-
     return prefix + secrets.token_hex(4)
 
 
@@ -68,6 +74,130 @@ def _folder(row: Any) -> dict:
         "sort": row["sort"],
         "createdAt": row["created_at"],
     }
+
+
+# ---------- 附件文件 ----------
+def _file_ids_of(images: Any, attachments: Any) -> set[str]:
+    """从图片 URL / 附件元数据中解析出文件 id。"""
+    ids: set[str] = set()
+    for item in images or []:
+        match = FILE_URL_RE.search(str(item))
+        if match:
+            ids.add(match.group(1))
+    for item in attachments or []:
+        if isinstance(item, dict):
+            if item.get("fileId"):
+                ids.add(str(item["fileId"]))
+            match = FILE_URL_RE.search(str(item.get("url") or ""))
+            if match:
+                ids.add(match.group(1))
+    return ids
+
+
+def _file_ids_from_row(row: Any) -> set[str]:
+    try:
+        images = json.loads(row["images"] or "[]")
+    except (json.JSONDecodeError, TypeError):
+        images = []
+    try:
+        attachments = json.loads(row["attachments"] or "[]")
+    except (json.JSONDecodeError, TypeError):
+        attachments = []
+    return _file_ids_of(images, attachments)
+
+
+def _remove_files(ids: set[str]) -> None:
+    if not ids:
+        return
+    FILES_DIR.mkdir(parents=True, exist_ok=True)
+    conn = connect()
+    try:
+        for fid in ids:
+            row = conn.execute("SELECT stored_name FROM files WHERE id = ?", (fid,)).fetchone()
+            if row is not None:
+                try:
+                    (FILES_DIR / row["stored_name"]).unlink(missing_ok=True)
+                except OSError:
+                    pass
+                conn.execute("DELETE FROM files WHERE id = ?", (fid,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_file(fid: str) -> None:
+    _remove_files({fid})
+
+
+def save_upload(filename: str, content: bytes, mime: str) -> dict:
+    safe_name = Path(filename or "").name or "未命名文件"
+    suffix = Path(safe_name).suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
+        suffix = ""
+    fid = "u" + secrets.token_hex(8)
+    stored_name = fid + suffix
+    FILES_DIR.mkdir(parents=True, exist_ok=True)
+    (FILES_DIR / stored_name).write_bytes(content)
+    conn = connect()
+    try:
+        conn.execute(
+            "INSERT INTO files (id, name, size, mime, stored_name, created_at) VALUES (?,?,?,?,?,?)",
+            (fid, safe_name, len(content), mime or "", stored_name, now_iso()),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    return {"id": fid, "name": safe_name, "size": len(content), "mime": mime or "", "url": f"/api/files/{fid}"}
+
+
+def get_file(fid: str) -> dict | None:
+    conn = connect()
+    try:
+        row = conn.execute("SELECT * FROM files WHERE id = ?", (fid,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        return None
+    path = FILES_DIR / row["stored_name"]
+    if not path.exists():
+        return None
+    return {
+        "id": row["id"],
+        "name": row["name"],
+        "size": row["size"],
+        "mime": row["mime"],
+        "path": path,
+    }
+
+
+def gc_orphan_files(max_age_seconds: int = 3600) -> int:
+    """清理未被任何事项引用、且上传超过 1 小时的孤儿文件。"""
+    conn = connect()
+    removed = 0
+    try:
+        referenced: set[str] = set()
+        for row in conn.execute("SELECT images, attachments FROM tasks"):
+            referenced |= _file_ids_from_row(row)
+        now = datetime.now()
+        for row in conn.execute("SELECT id, stored_name, created_at FROM files"):
+            if row["id"] in referenced:
+                continue
+            try:
+                created = datetime.fromisoformat(str(row["created_at"]).replace(" ", "T"))
+            except ValueError:
+                created = now
+            if (now - created).total_seconds() < max_age_seconds:
+                continue
+            try:
+                (FILES_DIR / row["stored_name"]).unlink(missing_ok=True)
+            except OSError:
+                pass
+            conn.execute("DELETE FROM files WHERE id = ?", (row["id"],))
+            removed += 1
+        conn.commit()
+    finally:
+        conn.close()
+    return removed
 
 
 def load_settings() -> dict:
@@ -146,12 +276,16 @@ def update_project(pid: str, payload: ProjectUpdate) -> dict | None:
 def delete_project(pid: str) -> None:
     conn = connect()
     try:
+        files: set[str] = set()
+        for row in conn.execute("SELECT images, attachments FROM tasks WHERE project_id = ?", (pid,)):
+            files |= _file_ids_from_row(row)
         conn.execute("DELETE FROM folders WHERE project_id = ?", (pid,))
         conn.execute("DELETE FROM tasks WHERE project_id = ?", (pid,))
         conn.execute("DELETE FROM projects WHERE id = ?", (pid,))
         conn.commit()
     finally:
         conn.close()
+    _remove_files(files)
 
 
 # ---------- 分组 ----------
@@ -258,18 +392,25 @@ def update_task(tid: str, payload: TaskUpdate) -> dict | None:
             values.append(tid)
             conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", values)
             conn.commit()
-        return _task(conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone())
+        new_row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
+        result = _task(new_row)
+        removed = _file_ids_from_row(row) - _file_ids_from_row(new_row)
     finally:
         conn.close()
+    _remove_files(removed)
+    return result
 
 
 def delete_task(tid: str) -> None:
     conn = connect()
     try:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
+        files = _file_ids_from_row(row) if row is not None else set()
         conn.execute("DELETE FROM tasks WHERE id = ?", (tid,))
         conn.commit()
     finally:
         conn.close()
+    _remove_files(files)
 
 
 def move_task(tid: str, project_id: str, folder_id: str) -> dict | None:
@@ -312,8 +453,11 @@ def reorder(payload) -> bool:
 
 def batch_delete(payload) -> None:
     conn = connect()
+    files: set[str] = set()
     try:
         for pid in payload.projectIds:
+            for row in conn.execute("SELECT images, attachments FROM tasks WHERE project_id = ?", (pid,)):
+                files |= _file_ids_from_row(row)
             conn.execute("DELETE FROM folders WHERE project_id = ?", (pid,))
             conn.execute("DELETE FROM tasks WHERE project_id = ?", (pid,))
             conn.execute("DELETE FROM projects WHERE id = ?", (pid,))
@@ -321,10 +465,14 @@ def batch_delete(payload) -> None:
             conn.execute("UPDATE tasks SET folder_id = '' WHERE folder_id = ?", (fid,))
             conn.execute("DELETE FROM folders WHERE id = ?", (fid,))
         for tid in payload.taskIds:
+            row = conn.execute("SELECT * FROM tasks WHERE id = ?", (tid,)).fetchone()
+            if row is not None:
+                files |= _file_ids_from_row(row)
             conn.execute("DELETE FROM tasks WHERE id = ?", (tid,))
         conn.commit()
     finally:
         conn.close()
+    _remove_files(files)
 
 
 def export_rows(ids: list[str], fmt: str) -> tuple[bytes, str, str]:

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import Modal from './Modal'
 
 interface Props {
   title: string
@@ -12,10 +13,12 @@ interface Props {
 
 export default function PromptModal(props: Props) {
   const [name, setName] = useState('')
+  const [error, setError] = useState('')
 
   const submit = () => {
     const value = name.trim()
     if (!value) {
+      setError('先填写' + props.label)
       props.onToast('先填写' + props.label)
       return
     }
@@ -23,38 +26,38 @@ export default function PromptModal(props: Props) {
   }
 
   return (
-    <>
-      <div className="mask" onClick={props.onClose} />
-      <div className="modal sm">
-        <div className="modal-card" onClick={(e) => e.stopPropagation()}>
-          <div className="d-head">
-            <h3>{props.title}</h3>
-            <button className="d-close" onClick={props.onClose}>
-              ×
-            </button>
-          </div>
-          <div className="ed-field">
-            <label>{props.label}</label>
-            <input
-              autoFocus
-              value={name}
-              placeholder={props.placeholder}
-              onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submit()
-              }}
-            />
-          </div>
-          <div className="d-foot">
-            <button className="btn btn-ghost" onClick={props.onClose}>
-              取消
-            </button>
-            <button className="btn btn-pri" onClick={submit}>
-              {props.confirmText || '创建'}
-            </button>
-          </div>
-        </div>
+    <Modal size="sm" onClose={props.onClose}>
+      <div className="d-head">
+        <h3>{props.title}</h3>
+        <button className="d-close" onClick={props.onClose}>
+          ×
+        </button>
       </div>
-    </>
+      <div className="ed-field">
+        <label>{props.label}</label>
+        <input
+          autoFocus
+          className={error ? 'invalid' : ''}
+          value={name}
+          placeholder={props.placeholder}
+          onChange={(e) => {
+            setName(e.target.value)
+            if (error) setError('')
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') submit()
+          }}
+        />
+        {error && <div className="field-error">{error}</div>}
+      </div>
+      <div className="d-foot">
+        <button className="btn btn-ghost" onClick={props.onClose}>
+          取消
+        </button>
+        <button className="btn btn-pri" onClick={submit}>
+          {props.confirmText || '创建'}
+        </button>
+      </div>
+    </Modal>
   )
 }

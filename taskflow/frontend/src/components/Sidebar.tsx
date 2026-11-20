@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { DragEvent as ReactDragEvent } from 'react'
 import type { AiContext, Folder, Project, Scope, Task } from '../types'
 import type { DragPayload } from '../utils'
@@ -44,7 +45,11 @@ export default function Sidebar(props: Props) {
 
   const openMenu = (projectId: string, el: HTMLElement) => {
     const rect = el.getBoundingClientRect()
-    setMenu({ projectId, top: rect.bottom + 4, left: Math.min(rect.left, window.innerWidth - 170) })
+    setMenu({
+      projectId,
+      top: Math.min(rect.bottom + 4, window.innerHeight - 100),
+      left: Math.min(rect.left, window.innerWidth - 170),
+    })
   }
 
   const allowDrop = (event: ReactDragEvent) => {
@@ -65,6 +70,17 @@ export default function Sidebar(props: Props) {
 
   const activeProjects = props.projects.filter((p) => !p.archived)
   const archived = props.projects.filter((p) => p.archived)
+  const archivedIds = new Set(archived.map((p) => p.id))
+  // 「全部事项」只统计当前可见（未归档项目）的事项数
+  const activeTaskCount = props.tasks.filter((t) => !archivedIds.has(t.projectId)).length
+
+  const guardDrag = (event: ReactDragEvent): boolean => {
+    if ((event.target as HTMLElement).closest('button,input,.tree-chk')) {
+      event.preventDefault()
+      return false
+    }
+    return true
+  }
 
   return (
     <aside className="sidebar">
@@ -89,7 +105,7 @@ export default function Sidebar(props: Props) {
           onClick={() => props.onSelectScope(null)}
         >
           <span className="f-icon">▦</span>
-          <span style={{ flex: 1 }}>全部事项({props.tasks.length})</span>
+          <span style={{ flex: 1 }}>全部事项({activeTaskCount})</span>
         </div>
 
         {activeProjects.map((p) => {
@@ -105,7 +121,10 @@ export default function Sidebar(props: Props) {
                   (dragOver === 'project:' + p.id ? ' drag-over' : '')
                 }
                 draggable={!props.batchMode}
-                onDragStart={() => setDragPayload({ type: 'project', id: p.id })}
+                onDragStart={(e) => {
+                  if (!guardDrag(e)) return
+                  setDragPayload({ type: 'project', id: p.id })
+                }}
                 onDragEnd={() => setDragPayload(null)}
                 onDragOver={(e) => {
                   allowDrop(e)
@@ -191,7 +210,10 @@ export default function Sidebar(props: Props) {
                           (dragOver === 'folder:' + f.id ? ' drag-over' : '')
                         }
                         draggable={!props.batchMode}
-                        onDragStart={() => setDragPayload({ type: 'folder', id: f.id })}
+                        onDragStart={(e) => {
+                          if (!guardDrag(e)) return
+                          setDragPayload({ type: 'folder', id: f.id })
+                        }}
                         onDragEnd={() => setDragPayload(null)}
                         onDragOver={(e) => {
                           allowDrop(e)
@@ -286,29 +308,33 @@ export default function Sidebar(props: Props) {
         ＋ 新建项目
       </button>
 
-      {menu && (
-        <>
-          <div className="mask" onClick={() => setMenu(null)} style={{ background: 'transparent' }} />
-          <div className="ctx-menu" style={{ top: menu.top, left: menu.left }}>
-            <button
-              onClick={() => {
-                props.onNewFolder(menu.projectId)
-                setMenu(null)
-              }}
-            >
-              新建分组
-            </button>
-            <button
-              onClick={() => {
-                props.onNewTask(menu.projectId)
-                setMenu(null)
-              }}
-            >
-              新建事项
-            </button>
-          </div>
-        </>
-      )}
+      {menu &&
+        createPortal(
+          <>
+            <div className="ctx-backdrop" onClick={() => setMenu(null)} />
+            <div className="ctx-menu" style={{ top: menu.top, left: menu.left }}>
+              <button
+                onClick={() => {
+                  const projectId = menu.projectId
+                  setMenu(null)
+                  props.onNewFolder(projectId)
+                }}
+              >
+                新建分组
+              </button>
+              <button
+                onClick={() => {
+                  const projectId = menu.projectId
+                  setMenu(null)
+                  props.onNewTask(projectId)
+                }}
+              >
+                新建事项
+              </button>
+            </div>
+          </>,
+          document.body,
+        )}
     </aside>
   )
 }

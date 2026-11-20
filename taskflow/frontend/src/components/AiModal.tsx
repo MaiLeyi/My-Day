@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { AiCandidate, AiContext, Folder, Project } from '../types'
 import { PRIORITY_OPTIONS } from '../utils'
 import { api } from '../api'
+import DateField from './DateField'
+import Modal from './Modal'
 
 interface Props {
   ctx: AiContext
@@ -91,10 +93,7 @@ export default function AiModal(props: Props) {
   }
 
   return (
-    <>
-      <div className="mask" onClick={props.onClose} />
-      <div className="modal">
-        <div className="ai-card" onClick={(e) => e.stopPropagation()}>
+    <Modal size="lg" onClose={props.onClose}>
           <div className="ai-head">
             <h3>✂ AI 拆分</h3>
             <button className="d-close" onClick={props.onClose}>
@@ -142,7 +141,13 @@ export default function AiModal(props: Props) {
                       </option>
                     ))}
                   </select>
-                  <input type="date" value={c.planDate} onChange={(e) => patch(i, { planDate: e.target.value })} />
+                  <DateField
+                    value={c.planDate}
+                    compact
+                    clearable
+                    placeholder="计划日"
+                    onChange={(value) => patch(i, { planDate: value })}
+                  />
                   <button
                     className="rm"
                     onClick={() => setCandidates((prev) => prev.filter((_, idx) => idx !== i))}
@@ -161,8 +166,6 @@ export default function AiModal(props: Props) {
               确认录入 {candidates.filter((c) => c.checked && c.title.trim()).length} 条
             </button>
           </div>
-        </div>
-      </div>
-    </>
+    </Modal>
   )
 }

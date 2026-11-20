@@ -78,6 +78,9 @@ export default function WeekView(props: Props) {
               >
                 {day.weekday} {day.label}
                 {day.isToday ? ' · 今天' : ''}
+                {(planned.length || dueItems.length) && (
+                  <span className="wday-count"> {planned.length + dueItems.length} 项</span>
+                )}
               </span>
               <button
                 className="wday-add"
@@ -91,7 +94,7 @@ export default function WeekView(props: Props) {
               </button>
             </h4>
             {planned.length || dueItems.length ? (
-              <>
+              <div className="wday-list">
                 {planned.map((t) => (
                   <TaskRow
                     key={t.id}
@@ -118,7 +121,7 @@ export default function WeekView(props: Props) {
                     onDropTask={props.onDropTask}
                   />
                 ))}
-              </>
+              </div>
             ) : (
               <div style={{ fontSize: 12.5, color: 'var(--sub2)', padding: '4px 12px' }}>—</div>
             )}

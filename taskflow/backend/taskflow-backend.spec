@@ -26,6 +26,9 @@ a = Analysis(
         "app.db",
         "app.models",
         "app.ai",
+        # FastAPI 上传文件依赖
+        "multipart",
+        "python_multipart",
     ],
     hookspath=[],
     hooksconfig={},

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { Settings, Theme, View } from '../types'
 import { api } from '../api'
+import Modal from './Modal'
 
 interface Props {
   settings: Settings
@@ -59,10 +60,7 @@ export default function SettingsModal(props: Props) {
   }
 
   return (
-    <>
-      <div className="mask" onClick={cancel} />
-      <div className="modal sm">
-        <div className="modal-card" onClick={(e) => e.stopPropagation()}>
+    <Modal size="sm" onClose={cancel}>
           <div className="d-head">
             <h3>设置</h3>
             <button className="d-close" onClick={cancel}>
@@ -145,8 +143,6 @@ export default function SettingsModal(props: Props) {
               保存
             </button>
           </div>
-        </div>
-      </div>
-    </>
+    </Modal>
   )
 }

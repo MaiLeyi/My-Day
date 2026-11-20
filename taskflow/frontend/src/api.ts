@@ -7,6 +7,7 @@ import type {
   Settings,
   Task,
   TaskInput,
+  UploadedFile,
 } from './types'
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
@@ -61,6 +62,25 @@ export const api = {
 
   batchDelete: (payload: { projectIds: string[]; folderIds: string[]; taskIds: string[] }) =>
     request<{ ok: boolean }>('/api/batch/delete', json(payload)),
+
+  uploadFile: async (file: File): Promise<UploadedFile> => {
+    const form = new FormData()
+    form.append('file', file)
+    const resp = await fetch('/api/files', { method: 'POST', body: form })
+    if (!resp.ok) {
+      let message = `上传失败（${resp.status}）`
+      try {
+        const body = await resp.json()
+        message = body.detail || body.message || message
+      } catch {
+        /* ignore */
+      }
+      throw new Error(message)
+    }
+    return resp.json() as Promise<UploadedFile>
+  },
+
+  deleteFile: (id: string) => request<void>(`/api/files/${id}`, { method: 'DELETE' }),
 
   saveSettings: (settings: Settings) =>
     request<Settings>('/api/settings', { method: 'PUT', body: JSON.stringify(settings) }),

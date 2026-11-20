@@ -5,9 +5,11 @@ import os
 from datetime import date
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from urllib.parse import quote
+
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import ai, store
@@ -38,11 +40,52 @@ app.add_middleware(
 )
 
 init_db()
+store.gc_orphan_files()
+
+MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 
 
 @app.get("/api/health")
 def health() -> dict:
     return {"ok": True}
+
+
+@app.post("/api/files", status_code=201)
+async def upload_file(file: UploadFile = File(...)) -> dict:
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "文件过大，单个附件上限 50MB")
+    if not content:
+        raise HTTPException(400, "文件为空")
+    return store.save_upload(file.filename or "未命名文件", content, file.content_type or "")
+
+
+@app.get("/api/files/{fid}")
+def get_file(fid: str, download: int = 0) -> FileResponse:
+    row = store.get_file(fid)
+    if row is None:
+        raise HTTPException(404, "文件不存在或已被清理")
+    if download:
+        # 中文文件名用 RFC 5987 编码，保证浏览器/桌面端都能正确保存
+        return FileResponse(
+            row["path"],
+            media_type=row["mime"] or "application/octet-stream",
+            headers={
+                "Content-Disposition": f"attachment; filename*=UTF-8''{quote(row['name'])}",
+                "Cache-Control": "private, max-age=86400",
+            },
+        )
+    return FileResponse(
+        row["path"],
+        media_type=row["mime"] or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
+@app.delete("/api/files/{fid}", status_code=204)
+def delete_file(fid: str) -> Response:
+    store.delete_file(fid)
+    return Response(status_code=204)
 
 
 @app.get("/api/bootstrap")

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from './api'
 import AiModal from './components/AiModal'
+import ConfirmDialog from './components/ConfirmDialog'
+import type { AskConfirmOptions } from './components/ConfirmDialog'
+import DateField from './components/DateField'
 import DayView from './components/DayView'
 import DetailModal from './components/DetailModal'
 import ExportModal from './components/ExportModal'
@@ -28,6 +31,8 @@ import type { DragPayload } from './utils'
 import { isOverdue, today } from './utils'
 
 type DetailState = { mode: 'view' | 'edit'; taskId?: string; draft?: TaskDraft } | null
+
+type ConfirmState = AskConfirmOptions | null
 
 const newDraft = (projects: Bootstrap['projects'], opts: { projectId?: string; folderId?: string; planDate?: string; start?: string; end?: string }): TaskDraft => ({
   title: '',
@@ -75,7 +80,7 @@ export default function App() {
   const [navOpen, setNavOpen] = useState(false)
   const [scope, setScope] = useState<Scope | null>(null)
   const [query, setQuery] = useState('')
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('todo')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [showDone, setShowDone] = useState(false)
   const [dateFilter, setDateFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState<'' | Priority>('')
@@ -96,6 +101,7 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [aiCtx, setAiCtx] = useState<AiContext | null>(null)
   const [previewTheme, setPreviewTheme] = useState<Theme | null>(null)
+  const [confirm, setConfirm] = useState<ConfirmState>(null)
 
   useEffect(() => {
     api
@@ -148,15 +154,13 @@ export default function App() {
 
   const matchStatus = (t: Task) => {
     if (statusFilter === 'unplanned') return !t.planDate && !t.dueDate
-    if (statusFilter === 'todo') return t.status === 'todo'
-    if (statusFilter === 'doing') return t.status === 'doing'
-    if (statusFilter === 'done') return t.status === 'done'
-    return true
+    if (statusFilter === 'all') return true
+    return t.status === statusFilter
   }
 
   const listTasks = tasks.filter((t) => {
     if (!matchStatus(t) || !inScope(t)) return false
-    if (!showDone && statusFilter !== 'done' && t.status === 'done') return false
+    if (statusFilter !== 'done' && !showDone && t.status === 'done') return false
     if (archivedIds.has(t.projectId)) return false
     if (dateFilter && statusFilter !== 'unplanned' && !(t.planDate === dateFilter || t.dueDate === dateFilter))
       return false
@@ -183,7 +187,7 @@ export default function App() {
   const selectScope = (next: Scope | null) => {
     setScope(next)
     setDateFilter('')
-    setStatusFilter('todo')
+    setStatusFilter('all')
     setShowDone(false)
     setPriorityFilter('')
     setOverdueOnly(false)
@@ -243,58 +247,76 @@ export default function App() {
     }
   }
 
-  const deleteProject = async (id: string) => {
-    const project = projects.find((p) => p.id === id)
-    if (!project) return
-    const folderCount = folders.filter((f) => f.projectId === id).length
-    const taskCount = tasks.filter((t) => t.projectId === id).length
-    if (
-      !window.confirm(
-        `删除项目「${project.name}」？\n将同时删除 ${folderCount} 个分组、${taskCount} 个事项，此操作不可撤销。`,
-      )
-    )
-      return
+  const runConfirm = async (state: ConfirmState) => {
+    if (!state) return
+    setConfirm(null)
     try {
-      await api.deleteProject(id)
-      if (scope && (scope.id === id || (scope.type === 'folder' && folders.find((f) => f.id === scope.id)?.projectId === id))) {
-        setScope(null)
-      }
-      await reload('已删除项目')
+      await state.action()
     } catch (err) {
       showToast((err as Error).message)
     }
   }
 
-  const deleteFolder = async (id: string) => {
+  const deleteProject = (id: string) => {
+    const project = projects.find((p) => p.id === id)
+    if (!project) return
+    const projectFolders = folders.filter((f) => f.projectId === id)
+    const projectTasks = tasks.filter((t) => t.projectId === id)
+    setConfirm({
+      title: `删除项目「${project.name}」？`,
+      message: '项目及其下的分组、事项都会被永久删除，无法撤销。',
+      details: [
+        { label: '分组', value: `${projectFolders.length} 个` },
+        { label: '事项', value: `${projectTasks.length} 个`, tone: projectTasks.length ? 'warn' : 'normal' },
+      ],
+      confirmText: '删除项目',
+      danger: true,
+      action: async () => {
+        await api.deleteProject(id)
+        if (
+          scope &&
+          (scope.id === id || (scope.type === 'folder' && projectFolders.some((f) => f.id === scope.id)))
+        ) {
+          setScope(null)
+        }
+        await reload('已删除项目')
+      },
+    })
+  }
+
+  const deleteFolder = (id: string) => {
     const folder = folders.find((f) => f.id === id)
     if (!folder) return
     const count = tasks.filter((t) => t.folderId === id).length
-    const message = count
-      ? `删除分组「${folder.name}」？\n其中 ${count} 个事项会保留在项目下（不再归组）。`
-      : `删除分组「${folder.name}」？`
-    if (!window.confirm(message)) return
-    try {
-      await api.deleteFolder(id)
-      if (scope?.type === 'folder' && scope.id === id) setScope(null)
-      await reload('已删除分组')
-    } catch (err) {
-      showToast((err as Error).message)
-    }
+    setConfirm({
+      title: `删除分组「${folder.name}」？`,
+      message: count ? '分组下的事项不会被删除，会保留在项目下并转为未分组。' : '该分组下暂无事项。',
+      details: [{ label: '分组内事项', value: `${count} 个` }],
+      confirmText: '删除分组',
+      danger: true,
+      action: async () => {
+        await api.deleteFolder(id)
+        if (scope?.type === 'folder' && scope.id === id) setScope(null)
+        await reload('已删除分组')
+      },
+    })
   }
 
-  const archiveProject = async (id: string) => {
+  const archiveProject = (id: string) => {
     const project = projects.find((p) => p.id === id)
     if (!project) return
     const count = tasks.filter((t) => t.projectId === id).length
-    if (!window.confirm(`归档项目「${project.name}」？\n将从主列表隐藏，其 ${count} 个事项暂时不显示，可随时恢复。`))
-      return
-    try {
-      await api.updateProject(id, { archived: true })
-      if (scope?.id === id) setScope(null)
-      await reload('已归档')
-    } catch (err) {
-      showToast((err as Error).message)
-    }
+    setConfirm({
+      title: `归档项目「${project.name}」？`,
+      message: '归档后项目会从主列表隐藏，可随时在「已归档」中恢复。',
+      details: [{ label: '涉及事项', value: `${count} 个` }],
+      confirmText: '归档',
+      action: async () => {
+        await api.updateProject(id, { archived: true })
+        if (scope?.id === id) setScope(null)
+        await reload('已归档')
+      },
+    })
   }
 
   const unarchiveProject = async (id: string) => {
@@ -306,7 +328,7 @@ export default function App() {
     }
   }
 
-  const batchDelete = async () => {
+  const batchDelete = () => {
     if (!selected.size) {
       showToast('先勾选项目、分组或事项')
       return
@@ -315,20 +337,37 @@ export default function App() {
     const folderIds = [...selected].filter((k) => k.startsWith('f:')).map((k) => k.slice(2))
     const taskIds = [...selected].filter((k) => k.startsWith('t:')).map((k) => k.slice(2))
     const projSet = new Set(projectIds)
-    const taskInProj = tasks.filter((t) => projSet.has(t.projectId)).length
-    const message =
-      `将删除 ${projectIds.length} 个项目、${folderIds.length} 个分组、${taskIds.length} 个事项？` +
-      (taskInProj ? `\n项目下 ${taskInProj} 个事项将一并删除。` : '') +
-      (folderIds.length ? '\n分组下事项会保留为未分组。' : '')
-    if (!window.confirm(message)) return
-    try {
-      await api.batchDelete({ projectIds, folderIds, taskIds })
-      setSelected(new Set())
-      setBatchMode(false)
-      await reload('已批量删除')
-    } catch (err) {
-      showToast((err as Error).message)
-    }
+    const folderSet = new Set(folderIds)
+    const taskSet = new Set(taskIds)
+
+    // 项目下的分组/事项本来就会随项目删除，不再重复计数
+    const foldersToDelete = folders.filter((f) => projSet.has(f.projectId) || folderSet.has(f.id))
+    const tasksToDelete = tasks.filter((t) => projSet.has(t.projectId) || taskSet.has(t.id))
+    const keptTasks = tasks.filter(
+      (t) => folderSet.has(t.folderId) && !projSet.has(t.projectId) && !taskSet.has(t.id),
+    )
+    const details = [
+      { label: '删除项目', value: `${projectIds.length} 个` },
+      { label: '删除分组', value: `${foldersToDelete.length} 个` },
+      { label: '删除事项', value: `${tasksToDelete.length} 个`, tone: tasksToDelete.length ? ('warn' as const) : ('normal' as const) },
+      ...(keptTasks.length
+        ? [{ label: '保留事项', value: `${keptTasks.length} 个（转为未分组）` }]
+        : []),
+    ].filter((_d, i) => i > 0 || projectIds.length > 0)
+
+    setConfirm({
+      title: '确认批量删除？',
+      message: '删除后无法恢复；仅删除分组时，分组下的事项会保留。',
+      details,
+      confirmText: '全部删除',
+      danger: true,
+      action: async () => {
+        await api.batchDelete({ projectIds, folderIds, taskIds })
+        setSelected(new Set())
+        setBatchMode(false)
+        await reload('已批量删除')
+      },
+    })
   }
 
   const openAi = (ctx: AiContext) => {
@@ -340,11 +379,15 @@ export default function App() {
   }
 
   const addOnDay = (iso: string) => openNew({ planDate: iso })
-  const addOnDayWithTime = () => {
-    const hour = new Date().getHours()
-    const start = String(hour).padStart(2, '0') + ':00'
-    const end = String(Math.min(23, hour + 1)).padStart(2, '0') + ':00'
-    openNew({ planDate: dayDate, start, end })
+  const addOnDayAt = (iso: string, start: string, end: string) => openNew({ planDate: iso, start, end })
+
+  const updateTaskTime = async (taskId: string, planDate: string, start: string, end: string) => {
+    try {
+      await api.updateTask(taskId, { planDate, start, end })
+      await reload()
+    } catch (err) {
+      showToast((err as Error).message)
+    }
   }
 
   const viewTitle = view === 'list' ? '清单' : view === 'week' ? '本周' : view === 'day' ? '日程' : '日历'
@@ -416,16 +459,18 @@ export default function App() {
                 <div className="spacer" />
                 {view === 'list' && (
                   <>
-                    <input
-                      type="date"
-                      className="date-filter"
-                      title="按日期筛选（清单）"
+                    <DateField
                       value={dateFilter}
-                      onChange={(e) => setDateFilter(e.target.value)}
+                      onChange={setDateFilter}
+                      placeholder="按日期筛选"
+                      clearable
+                      compact
+                      align="right"
                     />
                     <div className="chips">
                       {(
                         [
+                          ['all', '全部'],
                           ['todo', '待办'],
                           ['doing', '进行中'],
                           ['done', '已完成'],
@@ -533,7 +578,8 @@ export default function App() {
                 batchMode={batchMode}
                 selected={selected}
                 onDateChange={setDayDate}
-                onAdd={addOnDayWithTime}
+                onAddAt={addOnDayAt}
+                onScheduleRange={updateTaskTime}
                 onOpen={openTask}
                 onToggleSelect={(id) => toggleSel('t', id)}
                 onDropTask={dropTaskOnTask}
@@ -555,6 +601,7 @@ export default function App() {
           onChanged={reload}
           onToast={showToast}
           onMove={setMoveTaskId}
+          onConfirm={setConfirm}
         />
       )}
 
@@ -640,6 +687,18 @@ export default function App() {
           onClose={() => setAiCtx(null)}
           onCreated={reload}
           onToast={showToast}
+        />
+      )}
+
+      {confirm && (
+        <ConfirmDialog
+          title={confirm.title}
+          message={confirm.message}
+          details={confirm.details}
+          confirmText={confirm.confirmText}
+          danger={confirm.danger}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => runConfirm(confirm)}
         />
       )}
 
