@@ -1,0 +1,79 @@
+{
+  "name": "taskflow",
+  "version": "1.0.0",
+  "description": "任务流 —— 桌面端 & 网页端统一的事项管理",
+  "author": "TaskFlow",
+  "main": "electron/main.cjs",
+  "type": "module",
+  "scripts": {
+    "frontend:dev": "cd frontend && npm run dev",
+    "frontend:build": "cd frontend && npm run build",
+    "web": "cd frontend && npm run dev",
+    "backend:build": "python -m PyInstaller --noconfirm --clean --distpath backend/dist --workpath backend/build backend/taskflow-backend.spec",
+    "electron:dev": "electron . --dev",
+    "electron:prod": "npm run frontend:build && electron .",
+    "electron": "electron .",
+    "start": "npm run electron",
+    "dist:win": "npm run frontend:build && npm run backend:build && electron-builder --win",
+    "dist:dir": "npm run frontend:build && npm run backend:build && electron-builder --win --dir"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8"
+  },
+  "allowScripts": {
+    "electron": true,
+    "electron-builder": true
+  },
+  "build": {
+    "appId": "com.taskflow.desktop",
+    "productName": "TaskFlow",
+    "directories": {
+      "output": "release",
+      "buildResources": "electron"
+    },
+    "files": [
+      "electron/**/*",
+      "!electron/runtime.log",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "frontend/dist",
+        "to": "frontend"
+      },
+      {
+        "from": "backend/dist/taskflow-backend",
+        "to": "backend"
+      }
+    ],
+    "win": {
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "任务流"
+    },
+    "compression": "maximum"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
