@@ -93,12 +93,27 @@ ipcMain.handle('app:isPackaged', () => PACKAGED)
 ipcMain.handle('app:openDataDir', () => { openDataDir(); return true })
 ipcMain.handle('win:hide', () => { mainWindow?.hide(); return true })
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// 便携版首次启动时文件正在解压/被杀软扫描，existsSync 可能瞬时为 false，需重试
+async function waitForFile(target, timeoutMs = 8000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    try { if (fs.existsSync(target)) return true } catch { /* ignore */ }
+    await sleep(200)
+  }
+  return fs.existsSync(target)
+}
+
 async function boot() {
   log('[boot] DEV=', DEV, 'PACKAGED=', PACKAGED, 'BACKEND=', BACKEND_DIR, 'DATA=', DATA_DIR, 'DIST_EXISTS=', fs.existsSync(FRONTEND_DIST))
-  if (!DEV && !fs.existsSync(FRONTEND_DIST)) { failStart('前端构建产物不存在：' + FRONTEND_DIST); return }
+  if (!DEV && !(await waitForFile(FRONTEND_DIST))) { failStart('前端构建产物不存在：' + FRONTEND_DIST); return }
   if (PACKAGED) {
     const exe = path.join(BACKEND_DIR, process.platform === 'win32' ? 'taskflow-backend.exe' : 'taskflow-backend')
-    if (!fs.existsSync(exe)) { failStart('内置后端缺失：' + exe); return }
+    if (!(await waitForFile(exe))) {
+      failStart('内置后端缺失：' + exe + '\n\n若使用单文件便携版，请改用解压即用的 zip 版本。')
+      return
+    }
   }
 
   let port = 8000
