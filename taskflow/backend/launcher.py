@@ -1,6 +1,7 @@
 """PyInstaller 入口：以编程方式启动 uvicorn，供桌面端内置后端使用。
 
-桌面端打包后不再依赖本机 Python，本文件是打包进 taskflow-backend.exe 的入口。
+桌面端打包后不再依赖本机 Python，本文件是打包进后端可执行文件
+（Windows: taskflow-backend.exe，macOS/Linux: taskflow-backend）的入口。
 运行时通过环境变量接收配置：
   TASKFLOW_HOST           监听地址，默认 127.0.0.1
   TASKFLOW_PORT           监听端口，默认 8000

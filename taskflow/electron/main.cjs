@@ -8,6 +8,7 @@ const { spawnBackend, waitForReady, killBackend, findFreePort, getPort, getBacke
 
 const DEV = !app.isPackaged && (process.argv.includes('--dev') || process.env.ELECTRON_DEV === '1')
 const PACKAGED = app.isPackaged
+const IS_MAC = process.platform === 'darwin'
 const ROOT = path.resolve(__dirname, '..')
 const RESOURCES = PACKAGED ? process.resourcesPath : ROOT
 const BACKEND_DIR = PACKAGED ? path.join(RESOURCES, 'backend') : path.join(ROOT, 'backend')
@@ -31,6 +32,7 @@ function log(...args) {
 let mainWindow = null
 let tray = null
 let forceQuit = false
+let booted = false
 
 function indexUrl() {
   if (DEV) return 'http://localhost:5173'
@@ -64,12 +66,26 @@ function openDataDir() {
   } catch (err) { log('[openDataDir] fail', err.message) }
 }
 
-function createTray() {
-  let iconBuf
-  try { iconBuf = fs.readFileSync(path.join(__dirname, 'tray-placeholder.png')) } catch {
-    iconBuf = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64')
+// macOS 菜单栏使用模板图（黑色 + 透明），浅色/深色模式下自动反色；
+// Windows / Linux 用彩色图标。
+function trayImage() {
+  const file = IS_MAC ? 'trayTemplate.png' : 'tray.png'
+  const target = path.join(__dirname, file)
+  if (fs.existsSync(target)) {
+    const img = nativeImage.createFromPath(target)
+    if (!img.isEmpty()) {
+      if (IS_MAC) img.setTemplateImage(true)
+      return img
+    }
   }
-  tray = new Tray(nativeImage.createFromBuffer(iconBuf))
+  // 兜底：1x1 透明图，保证 Tray 不因缺图而报错
+  return nativeImage.createFromBuffer(
+    Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64'),
+  )
+}
+
+function createTray() {
+  tray = new Tray(trayImage())
   tray.setToolTip('任务流')
   tray.on('click', () => { if (mainWindow) { mainWindow.show(); mainWindow.focus() } })
   tray.on('right-click', () => {
@@ -82,11 +98,57 @@ function createTray() {
   })
 }
 
+// macOS 没有应用菜单时会缺失 Cmd+C/V/Q 等标准快捷键，这里补一份最小菜单。
+function setupMacMenu() {
+  if (!IS_MAC) return
+  Menu.setApplicationMenu(Menu.buildFromTemplate([
+    {
+      label: app.name,
+      submenu: [
+        { role: 'about', label: '关于任务流' },
+        { type: 'separator' },
+        { role: 'hide', label: '隐藏任务流' },
+        { role: 'hideOthers', label: '隐藏其他' },
+        { role: 'unhide', label: '全部显示' },
+        { type: 'separator' },
+        { role: 'quit', label: '退出任务流' },
+      ],
+    },
+    {
+      label: '编辑',
+      submenu: [
+        { role: 'undo', label: '撤销' },
+        { role: 'redo', label: '重做' },
+        { type: 'separator' },
+        { role: 'cut', label: '剪切' },
+        { role: 'copy', label: '复制' },
+        { role: 'paste', label: '粘贴' },
+        { role: 'selectAll', label: '全选' },
+      ],
+    },
+    {
+      label: '窗口',
+      submenu: [
+        { role: 'minimize', label: '最小化' },
+        { role: 'zoom', label: '缩放' },
+        { role: 'close', label: '关闭窗口' },
+        { type: 'separator' },
+        { role: 'front', label: '前置全部窗口' },
+      ],
+    },
+  ]))
+}
+
 function failStart(msg) { log('[boot] FAIL:', msg); try { dialog.showErrorBox('任务流启动失败', msg) } catch {} }
 
 app.on('before-quit', () => { forceQuit = true; killBackend() })
 app.on('window-all-closed', () => { /* 交给托盘维持 */ })
-app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow() })
+// macOS 点击 Dock 图标：窗口被收起（隐藏）时应重新显示
+app.on('activate', () => {
+  if (!booted) return
+  if (!mainWindow) createWindow()
+  else { mainWindow.show(); mainWindow.focus() }
+})
 
 ipcMain.handle('app:isDev', () => DEV)
 ipcMain.handle('app:isPackaged', () => PACKAGED)
@@ -149,6 +211,7 @@ async function boot() {
 
   createWindow()
   createTray()
+  booted = true
   log('[boot] window opened')
   if (Notification.isSupported()) { try { new Notification({ title: '任务流', body: '已就绪' }).show() } catch {} }
 }
@@ -162,6 +225,12 @@ if (!gotLock) {
     if (mainWindow) { mainWindow.show(); mainWindow.focus() }
   })
   app.whenReady().then(async () => {
+    setupMacMenu()
+    // 开发期 Dock 图标默认是 Electron，换成应用图标
+    if (IS_MAC && !PACKAGED && app.dock) {
+      const iconPath = path.join(__dirname, 'icon.png')
+      if (fs.existsSync(iconPath)) app.dock.setIcon(iconPath)
+    }
     try { await boot() } catch (err) {
       log('[boot] exception:', err?.message || String(err))
       failStart(err?.message || String(err))

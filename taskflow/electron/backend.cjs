@@ -1,5 +1,6 @@
 // 后端服务：探测可执行路径、spawn、守护、就绪探测。
-// 开发期跑本机 Python + uvicorn；打包期跑 PyInstaller 产物 taskflow-backend.exe。
+// 开发期跑本机 Python + uvicorn；打包期跑 PyInstaller 产物
+// （Windows: taskflow-backend.exe，macOS/Linux: taskflow-backend）。
 const { spawn } = require('node:child_process')
 const net = require('node:net')
 const path = require('node:path')

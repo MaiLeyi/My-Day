@@ -10,12 +10,16 @@
     "frontend:build": "cd frontend && npm run build",
     "web": "cd frontend && npm run dev",
     "backend:build": "python -m PyInstaller --noconfirm --clean --distpath backend/dist --workpath backend/build backend/taskflow-backend.spec",
+    "backend:build:mac": "python3 -m PyInstaller --noconfirm --clean --distpath backend/dist --workpath backend/build backend/taskflow-backend.spec",
     "electron:dev": "electron . --dev",
     "electron:prod": "npm run frontend:build && electron .",
     "electron": "electron .",
     "start": "npm run electron",
+    "dist": "node scripts/dist.mjs",
     "dist:win": "npm run frontend:build && npm run backend:build && electron-builder --win",
-    "dist:dir": "npm run frontend:build && npm run backend:build && electron-builder --win --dir"
+    "dist:dir": "npm run frontend:build && npm run backend:build && electron-builder --win --dir",
+    "dist:mac": "npm run frontend:build && npm run backend:build:mac && electron-builder --mac",
+    "dist:mac:dir": "npm run frontend:build && npm run backend:build:mac && electron-builder --mac --dir"
   },
   "devDependencies": {
     "electron": "^33.0.0",
@@ -68,6 +72,14 @@
             "x64"
           ]
         }
+      ]
+    },
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "electron/icon.png",
+      "target": [
+        "dmg",
+        "zip"
       ]
     },
     "nsis": {
