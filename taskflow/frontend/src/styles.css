@@ -289,6 +289,22 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .storage-actions{display:flex;gap:8px;margin-bottom:6px}
 .storage-actions .btn{padding:6px 10px;font-size:12.5px}
 
+/* 设置 · 左侧分类 + 右侧明细 */
+.modal-card.settings-modal{max-width:760px;padding:18px 20px}
+.settings-body{display:flex;gap:18px;min-height:340px;max-height:58vh;margin-top:8px}
+.settings-nav{display:flex;flex-direction:column;gap:3px;width:132px;flex-shrink:0;border-right:1px solid var(--line);padding-right:12px}
+.settings-nav button{text-align:left;padding:9px 12px;border-radius:9px;font-size:13.5px;color:var(--sub)}
+.settings-nav button:hover{background:var(--gray1);color:var(--text)}
+.settings-nav button.active{background:var(--ink-soft);color:var(--text);font-weight:600}
+.settings-pane{flex:1;min-width:0;overflow-y:auto;padding:2px 6px 2px 0}
+.settings-pane .ed-field:last-child{margin-bottom:0}
+.settings-modal .d-foot{margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+@media (max-width:640px){
+  .settings-body{flex-direction:column;gap:10px;min-height:0;max-height:56vh}
+  .settings-nav{flex-direction:row;width:auto;border-right:none;border-bottom:1px solid var(--line);padding:0 0 8px;overflow-x:auto}
+  .settings-nav button{white-space:nowrap}
+}
+
 .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--on-ink);padding:9px 18px;border-radius:10px;font-size:13.5px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.15)}
 
 /* ===== 统一弹窗 / 确认框 ===== */
