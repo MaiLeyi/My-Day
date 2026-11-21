@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('taskflow', {
   // 安装位置与数据位置
   paths: () => ipcRenderer.invoke('app:paths'),
   openPath: (kind) => ipcRenderer.invoke(kind === 'app' ? 'app:openAppDir' : 'app:openDataDir'),
+  // 更改数据目录（含迁移）
+  chooseDataDir: () => ipcRenderer.invoke('app:chooseDataDir'),
   // 平台
   platform: process.platform,
 })

@@ -91,11 +91,25 @@ export interface DesktopPaths {
   version: string
 }
 
+export interface DataDirPaths {
+  dataDir: string
+  dbPath: string
+  filesDir: string
+}
+
+export interface ChooseDataDirResult {
+  ok: boolean
+  canceled?: boolean
+  message?: string
+  paths?: DataDirPaths
+}
+
 declare global {
   interface Window {
     taskflow?: {
       paths?: () => Promise<DesktopPaths>
       openPath?: (kind: 'app' | 'data') => Promise<boolean>
+      chooseDataDir?: () => Promise<ChooseDataDirResult>
     }
   }
 }

@@ -122,19 +122,32 @@ function waitForReady({ timeoutMs = 20000 } = {}) {
   })
 }
 
+// 停止后端并等待进程退出（用于迁移数据前释放 SQLite 文件锁）
 function killBackend() {
-  if (!child) return
-  const pid = child.pid
+  if (!child) return Promise.resolve()
+  const proc = child
+  const pid = proc.pid
   child = null
-  try {
-    if (process.platform === 'win32') {
-      spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
-    } else {
-      process.kill(pid, 'SIGTERM')
+  return new Promise((resolve) => {
+    let done = false
+    const finish = () => {
+      if (done) return
+      done = true
+      resolve()
     }
-  } catch {
-    /* ignore */
-  }
+    proc.once('exit', finish)
+    // 兜底：进程无响应时最多等 3 秒
+    setTimeout(finish, 3000)
+    try {
+      if (process.platform === 'win32') {
+        spawn('taskkill', ['/PID', String(pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' })
+      } else {
+        proc.kill('SIGTERM')
+      }
+    } catch {
+      finish()
+    }
+  })
 }
 
 module.exports = {

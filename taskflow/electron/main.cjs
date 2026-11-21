@@ -5,6 +5,7 @@ const fs = require('node:fs')
 const { app, BrowserWindow, Tray, Menu, Notification, shell, dialog, ipcMain, nativeImage } = require('electron')
 
 const { spawnBackend, waitForReady, killBackend, findFreePort, getPort, getBackend, HOST } = require('./backend.cjs')
+const { defaultPathsFor, validateDataDir, ensureWritable, copyDataDir } = require('./storage.cjs')
 
 const DEV = !app.isPackaged && (process.argv.includes('--dev') || process.env.ELECTRON_DEV === '1')
 const PACKAGED = app.isPackaged
@@ -16,9 +17,26 @@ const FRONTEND_DIST = PACKAGED
   ? path.join(RESOURCES, 'frontend')
   : path.join(ROOT, 'frontend', 'dist')
 const PRELOAD = path.join(__dirname, 'preload.cjs')
-// 打包后数据库与日志放在用户数据目录（安装目录只读）
-const DATA_DIR = PACKAGED ? app.getPath('userData') : path.join(BACKEND_DIR, 'data')
+// 数据目录：默认放用户数据目录，可在设置中修改。
+// 配置文件固定放在 userData（不随数据目录变化），作为定位数据目录的唯一锚点。
+const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json')
+const DEFAULT_DATA_DIR = PACKAGED ? app.getPath('userData') : path.join(BACKEND_DIR, 'data')
 const LOG_FILE = PACKAGED ? path.join(app.getPath('userData'), 'runtime.log') : path.join(__dirname, 'runtime.log')
+
+function readConfig() {
+  try { return JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) || {} } catch { return {} }
+}
+
+function writeConfig(next) {
+  fs.mkdirSync(path.dirname(CONFIG_FILE), { recursive: true })
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(next, null, 2))
+}
+
+let DATA_DIR = DEFAULT_DATA_DIR
+const savedConfig = readConfig()
+if (typeof savedConfig.dataDir === 'string' && savedConfig.dataDir.trim()) {
+  DATA_DIR = path.resolve(savedConfig.dataDir)
+}
 
 function log(...args) {
   const line = new Date().toISOString() + ' ' + args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')
@@ -182,6 +200,67 @@ ipcMain.handle('app:paths', () => ({
   version: app.getVersion(),
 }))
 ipcMain.handle('win:hide', () => { mainWindow?.hide(); return true })
+
+// 用指定数据目录重新拉起后端（迁移数据后调用）
+async function restartBackend(dataDir) {
+  spawnBackend({
+    backendDir: BACKEND_DIR,
+    dev: DEV,
+    packaged: PACKAGED,
+    port: getPort(),
+    dataDir,
+    frontendDist: FRONTEND_DIST,
+  })
+  await waitForReady({ timeoutMs: 30000 })
+  if (!getBackend()) throw new Error('后端进程已退出，端口可能被占用')
+}
+
+ipcMain.handle('app:chooseDataDir', async () => {
+  if (!mainWindow) return { ok: false, message: '窗口尚未就绪' }
+  const picked = await dialog.showOpenDialog(mainWindow, {
+    title: '选择数据存储目录',
+    buttonLabel: '选择此目录',
+    properties: ['openDirectory', 'createDirectory'],
+  })
+  const target = picked.filePaths?.[0]
+  if (picked.canceled || !target) return { ok: false, canceled: true }
+
+  const check = validateDataDir(target, DATA_DIR, { packaged: PACKAGED, appDir: appLocation() })
+  if (!check.ok) return check
+  const writable = ensureWritable(path.resolve(target))
+  if (!writable.ok) return writable
+
+  const confirm = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    title: '更改数据存储位置',
+    message: '迁移现有数据到新目录？',
+    detail: `新目录：${target}\n\n数据库与附件会复制到新目录，完成后应用改用新位置；原目录数据保留，可自行删除。`,
+    buttons: ['开始迁移', '取消'],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  })
+  if (confirm.response !== 0) return { ok: false, canceled: true }
+
+  const previous = path.resolve(DATA_DIR)
+  const next = path.resolve(target)
+  try {
+    await killBackend()
+    await copyDataDir(previous, next)
+    writeConfig({ ...readConfig(), dataDir: next })
+    DATA_DIR = next
+    await restartBackend(next)
+    log('[data] migrated', previous, '->', next)
+    return { ok: true, paths: defaultPathsFor(next) }
+  } catch (err) {
+    log('[data] migrate fail', err.message)
+    // 回滚：恢复原数据目录并重新拉起后端
+    try { writeConfig({ ...readConfig(), dataDir: previous }) } catch { /* ignore */ }
+    DATA_DIR = previous
+    try { await restartBackend(previous) } catch (e) { log('[data] rollback restart fail', e.message) }
+    return { ok: false, message: `迁移失败：${err.message}` }
+  }
+})
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 

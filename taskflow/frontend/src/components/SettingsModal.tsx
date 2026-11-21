@@ -32,6 +32,7 @@ export default function SettingsModal(props: Props) {
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null)
   const [storage, setStorage] = useState<StorageInfo | null>(null)
   const [appDir, setAppDir] = useState('')
+  const [migrating, setMigrating] = useState(false)
 
   const desktop = typeof window !== 'undefined' && !!window.taskflow
 
@@ -54,6 +55,25 @@ export default function SettingsModal(props: Props) {
 
   const patchAi = (patch: Partial<Settings['ai']>) =>
     setForm((prev) => ({ ...prev, ai: { ...prev.ai, ...patch } }))
+
+  const changeDataDir = async () => {
+    if (!window.taskflow?.chooseDataDir) return
+    setMigrating(true)
+    try {
+      const result = await window.taskflow.chooseDataDir()
+      if (result.ok && result.paths) {
+        setStorage((prev) => (prev ? { ...prev, ...result.paths } : prev))
+        api.storage().then(setStorage).catch(() => {})
+        props.onToast('数据已迁移到新目录')
+      } else if (!result.canceled && result.message) {
+        props.onToast(result.message)
+      }
+    } catch (err) {
+      props.onToast((err as Error).message)
+    } finally {
+      setMigrating(false)
+    }
+  }
 
   const test = async () => {
     if (!form.ai.apiKey.trim()) {
@@ -242,6 +262,16 @@ export default function SettingsModal(props: Props) {
                   <button className="btn btn-ghost" onClick={() => window.taskflow?.openPath?.('data')}>
                     打开数据目录
                   </button>
+                  {window.taskflow?.chooseDataDir && (
+                    <button className="btn btn-ghost" onClick={changeDataDir} disabled={migrating}>
+                      {migrating ? '迁移中…' : '更改数据目录'}
+                    </button>
+                  )}
+                </div>
+              )}
+              {desktop && (
+                <div className="place-hint" style={{ marginTop: 10 }}>
+                  更改数据目录会把现有数据库与附件复制到新位置，原目录数据保留。安装位置不提供修改。
                 </div>
               )}
             </>
