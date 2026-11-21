@@ -75,6 +75,31 @@ export interface Bootstrap {
   settings: Settings
 }
 
+export interface StorageInfo {
+  dataDir: string
+  dbPath: string
+  filesDir: string
+  executable: string
+  mode: 'packaged' | 'source'
+}
+
+export interface DesktopPaths {
+  appDir: string
+  dataDir: string
+  logFile: string
+  packaged: boolean
+  version: string
+}
+
+declare global {
+  interface Window {
+    taskflow?: {
+      paths?: () => Promise<DesktopPaths>
+      openPath?: (kind: 'app' | 'data') => Promise<boolean>
+    }
+  }
+}
+
 export interface TaskInput {
   title: string
   projectId: string

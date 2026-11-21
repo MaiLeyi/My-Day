@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import type { Settings, Theme, View } from '../types'
+import { useEffect, useState } from 'react'
+import type { Settings, StorageInfo, Theme, View } from '../types'
 import { api } from '../api'
 import Modal from './Modal'
 
@@ -21,6 +21,27 @@ export default function SettingsModal(props: Props) {
   }))
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null)
+  const [storage, setStorage] = useState<StorageInfo | null>(null)
+  const [appDir, setAppDir] = useState('')
+
+  const desktop = typeof window !== 'undefined' && !!window.taskflow
+
+  useEffect(() => {
+    api
+      .storage()
+      .then(setStorage)
+      .catch(() => {})
+    window.taskflow?.paths?.().then((paths) => setAppDir(paths.appDir)).catch(() => {})
+  }, [])
+
+  const copyPath = async (value: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      props.onToast('路径已复制')
+    } catch {
+      props.onToast('复制失败，请手动选择复制')
+    }
+  }
 
   const patchAi = (patch: Partial<Settings['ai']>) =>
     setForm((prev) => ({ ...prev, ai: { ...prev.ai, ...patch } }))
@@ -135,6 +156,55 @@ export default function SettingsModal(props: Props) {
               <option value="dark">夜墨深色</option>
             </select>
           </div>
+          <div className="sec-label">数据存储</div>
+          <div className="storage-list">
+            <div className="storage-row">
+              <span className="storage-k">应用位置</span>
+              <span className="storage-v">{desktop ? appDir || '读取中…' : '网页端（浏览器访问，无本地安装）'}</span>
+              {desktop && appDir && (
+                <button className="storage-copy" onClick={() => copyPath(appDir)}>
+                  复制
+                </button>
+              )}
+            </div>
+            <div className="storage-row">
+              <span className="storage-k">数据目录</span>
+              <span className="storage-v">{storage?.dataDir || '读取中…'}</span>
+              {storage && (
+                <button className="storage-copy" onClick={() => copyPath(storage.dataDir)}>
+                  复制
+                </button>
+              )}
+            </div>
+            <div className="storage-row">
+              <span className="storage-k">数据库</span>
+              <span className="storage-v">{storage?.dbPath || '读取中…'}</span>
+              {storage && (
+                <button className="storage-copy" onClick={() => copyPath(storage.dbPath)}>
+                  复制
+                </button>
+              )}
+            </div>
+            <div className="storage-row">
+              <span className="storage-k">附件目录</span>
+              <span className="storage-v">{storage?.filesDir || '读取中…'}</span>
+              {storage && (
+                <button className="storage-copy" onClick={() => copyPath(storage.filesDir)}>
+                  复制
+                </button>
+              )}
+            </div>
+          </div>
+          {desktop && window.taskflow?.openPath && (
+            <div className="storage-actions">
+              <button className="btn btn-ghost" onClick={() => window.taskflow?.openPath?.('app')}>
+                打开应用目录
+              </button>
+              <button className="btn btn-ghost" onClick={() => window.taskflow?.openPath?.('data')}>
+                打开数据目录
+              </button>
+            </div>
+          )}
           <div className="d-foot">
             <button className="btn btn-ghost" onClick={cancel}>
               取消

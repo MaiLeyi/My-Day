@@ -6,6 +6,7 @@ import csv
 import io
 import re
 import secrets
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -198,6 +199,17 @@ def gc_orphan_files(max_age_seconds: int = 3600) -> int:
     finally:
         conn.close()
     return removed
+
+
+def storage_info() -> dict:
+    """当前运行方式与数据落盘位置，供设置页展示。"""
+    return {
+        "dataDir": str(DB_PATH.parent.resolve()),
+        "dbPath": str(DB_PATH.resolve()),
+        "filesDir": str(FILES_DIR.resolve()),
+        "executable": sys.executable,
+        "mode": "packaged" if getattr(sys, "frozen", False) else "source",
+    }
 
 
 def load_settings() -> dict:

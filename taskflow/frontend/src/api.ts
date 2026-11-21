@@ -5,6 +5,7 @@ import type {
   Folder,
   Project,
   Settings,
+  StorageInfo,
   Task,
   TaskInput,
   UploadedFile,
@@ -36,6 +37,7 @@ const json = (body: unknown): RequestInit => ({
 
 export const api = {
   bootstrap: () => request<Bootstrap>('/api/bootstrap'),
+  storage: () => request<StorageInfo>('/api/storage'),
 
   createProject: (name: string) => request<Project>('/api/projects', json({ name })),
   updateProject: (id: string, patch: { name?: string; archived?: boolean }) =>

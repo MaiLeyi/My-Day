@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('taskflow', {
   hide: () => ipcRenderer.invoke('win:hide'),
   // 打开数据目录
   openDataDir: () => ipcRenderer.invoke('app:openDataDir'),
+  // 安装位置与数据位置
+  paths: () => ipcRenderer.invoke('app:paths'),
+  openPath: (kind) => ipcRenderer.invoke(kind === 'app' ? 'app:openAppDir' : 'app:openDataDir'),
   // 平台
   platform: process.platform,
 })

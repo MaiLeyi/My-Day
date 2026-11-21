@@ -279,6 +279,16 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .test-result.err{color:#c0392b}
 .ai-test-row{display:flex;align-items:center;gap:10px;margin:4px 0 14px}
 
+/* 设置 · 数据存储 */
+.storage-list{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}
+.storage-row{display:flex;align-items:center;gap:10px;background:var(--gray1);border-radius:10px;padding:8px 11px}
+.storage-k{color:var(--sub);font-size:12.5px;flex-shrink:0;min-width:60px}
+.storage-v{flex:1;min-width:0;color:var(--text);font-size:12.5px;line-height:1.5;word-break:break-all}
+.storage-copy{flex-shrink:0;font-size:12px;color:var(--sub);background:none;border:none;cursor:pointer;padding:2px 4px}
+.storage-copy:hover{color:var(--text)}
+.storage-actions{display:flex;gap:8px;margin-bottom:6px}
+.storage-actions .btn{padding:6px 10px;font-size:12.5px}
+
 .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--on-ink);padding:9px 18px;border-radius:10px;font-size:13.5px;z-index:60;box-shadow:0 6px 20px rgba(0,0,0,.15)}
 
 /* ===== 统一弹窗 / 确认框 ===== */

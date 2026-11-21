@@ -66,6 +66,26 @@ function openDataDir() {
   } catch (err) { log('[openDataDir] fail', err.message) }
 }
 
+// 应用安装位置：打包后为安装目录（macOS 为 .app 路径），开发期为项目根目录
+function appLocation() {
+  if (!PACKAGED) return ROOT
+  const exe = app.getPath('exe')
+  if (IS_MAC) {
+    const idx = exe.indexOf('.app/')
+    if (idx !== -1) return exe.slice(0, idx + 4)
+  }
+  return path.dirname(exe)
+}
+
+function openAppDir() {
+  try {
+    const target = appLocation()
+    // macOS 打开 .app 会启动应用，这里改为在 Finder 中定位
+    if (IS_MAC && target.endsWith('.app')) shell.showItemInFolder(target)
+    else shell.openPath(target)
+  } catch (err) { log('[openAppDir] fail', err.message) }
+}
+
 // macOS 菜单栏使用模板图（黑色 + 透明），浅色/深色模式下自动反色；
 // Windows / Linux 用彩色图标。
 function trayImage() {
@@ -153,6 +173,14 @@ app.on('activate', () => {
 ipcMain.handle('app:isDev', () => DEV)
 ipcMain.handle('app:isPackaged', () => PACKAGED)
 ipcMain.handle('app:openDataDir', () => { openDataDir(); return true })
+ipcMain.handle('app:openAppDir', () => { openAppDir(); return true })
+ipcMain.handle('app:paths', () => ({
+  appDir: appLocation(),
+  dataDir: DATA_DIR,
+  logFile: LOG_FILE,
+  packaged: PACKAGED,
+  version: app.getVersion(),
+}))
 ipcMain.handle('win:hide', () => { mainWindow?.hide(); return true })
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))

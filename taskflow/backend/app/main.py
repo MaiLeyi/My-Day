@@ -93,6 +93,11 @@ def bootstrap() -> dict:
     return store.bootstrap()
 
 
+@app.get("/api/storage")
+def storage() -> dict:
+    return store.storage_info()
+
+
 @app.post("/api/projects", status_code=201)
 def create_project(payload: ProjectCreate) -> dict:
     return store.create_project(payload)
