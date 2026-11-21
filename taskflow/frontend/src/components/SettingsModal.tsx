@@ -133,13 +133,17 @@ export default function SettingsModal(props: Props) {
               </div>
               <div className="ed-field">
                 <label>模型</label>
-                <select value={form.ai.model} onChange={(e) => patchAi({ model: e.target.value })}>
+                <input
+                  value={form.ai.model}
+                  placeholder="如 gpt-4o、deepseek-chat"
+                  list="ai-model-options"
+                  onChange={(e) => patchAi({ model: e.target.value })}
+                />
+                <datalist id="ai-model-options">
                   {MODELS.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
+                    <option key={m} value={m} />
                   ))}
-                </select>
+                </datalist>
               </div>
               <div className="ai-test-row">
                 <button className="btn btn-ghost" onClick={test} disabled={testing}>
