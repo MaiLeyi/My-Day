@@ -50,6 +50,7 @@ def _task(row: Any) -> dict:
         "remark": row["remark"],
         "images": json.loads(row["images"] or "[]"),
         "attachments": json.loads(row["attachments"] or "[]"),
+        "needReview": bool(row["need_review"]),
         "sort": row["sort"],
         "createdAt": row["created_at"],
         "completedAt": row["completed_at"],
@@ -351,15 +352,15 @@ def create_task(payload: TaskCreate) -> dict:
         completed = created if payload.status == "done" else ""
         conn.execute(
             """INSERT INTO tasks (id, title, project_id, folder_id, status, priority, plan_date, due_date,
-               start_time, end_time, description, remark, images, attachments, sort, created_at, completed_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               start_time, end_time, description, remark, images, attachments, need_review, sort, created_at, completed_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 tid, payload.title.strip() or "未命名事项", payload.projectId, payload.folderId,
                 payload.status, payload.priority, payload.planDate, payload.dueDate,
                 payload.start, payload.end, payload.desc, payload.remark,
                 json.dumps(payload.images, ensure_ascii=False),
                 json.dumps([a.model_dump() for a in payload.attachments], ensure_ascii=False),
-                sort, created, completed,
+                int(payload.needReview), sort, created, completed,
             ),
         )
         conn.commit()
@@ -383,6 +384,7 @@ def update_task(tid: str, payload: TaskUpdate) -> dict | None:
             "start": "start_time",
             "end": "end_time",
             "desc": "description",
+            "needReview": "need_review",
         }
         sets: list[str] = []
         values: list[Any] = []
@@ -391,6 +393,8 @@ def update_task(tid: str, payload: TaskUpdate) -> dict | None:
                 value = json.dumps(value, ensure_ascii=False)
             elif key == "title":
                 value = (value or "").strip() or "未命名事项"
+            elif key == "needReview":
+                value = int(bool(value))
             sets.append(f"{mapping.get(key, key)} = ?")
             values.append(value)
         old_status = row["status"]

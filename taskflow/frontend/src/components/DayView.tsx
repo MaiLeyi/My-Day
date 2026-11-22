@@ -5,7 +5,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from 'react'
 import type { Folder, Project, Task } from '../types'
-import { PRIORITY_LABEL, STATUS, fmt, getDragPayload, parseDate, setDragPayload, today } from '../utils'
+import { PRIORITY_LABEL, fmt, getDragPayload, markConflicts, parseDate, setDragPayload, today } from '../utils'
 import DateField from './DateField'
 
 interface Props {
@@ -22,7 +22,6 @@ interface Props {
   onOpen: (id: string) => void
   onToggleSelect: (id: string) => void
   onDropTask: (sourceId: string, targetId: string) => void
-  onEdit: (id: string) => void
   onToggleStatus: (task: Task) => void
   onDeleteTask: (task: Task) => void
 }
@@ -57,37 +56,7 @@ interface TimedItem {
   task: Task
   start: number
   end: number
-  lane: number
-  laneCount: number
-}
-
-/** 把时间重叠的事项分到不同泳道，避免互相遮挡。 */
-function layoutTimed(items: { task: Task; start: number; end: number }[]): TimedItem[] {
-  const sorted = [...items].sort((a, b) => a.start - b.start || a.end - b.end)
-  const result: TimedItem[] = []
-  let cluster: { task: Task; start: number; end: number; lane: number }[] = []
-  let clusterEnd = -1
-
-  const flush = () => {
-    if (!cluster.length) return
-    const laneCount = Math.max(...cluster.map((c) => c.lane)) + 1
-    cluster.forEach((c) => result.push({ ...c, laneCount }))
-    cluster = []
-    clusterEnd = -1
-  }
-
-  for (const item of sorted) {
-    if (cluster.length && item.start >= clusterEnd) flush()
-    const used = new Set(
-      cluster.filter((c) => c.start < item.end && item.start < c.end).map((c) => c.lane),
-    )
-    let lane = 0
-    while (used.has(lane)) lane += 1
-    cluster.push({ ...item, lane })
-    clusterEnd = Math.max(clusterEnd, item.end)
-  }
-  flush()
-  return result
+  conflict: boolean
 }
 
 interface DragState {
@@ -101,10 +70,19 @@ interface DragState {
   moved: boolean
 }
 
+interface SelectState {
+  startMin: number
+  curMin: number
+  dragging: boolean
+}
+
 export default function DayView(props: Props) {
   const [drag, setDrag] = useState<DragState | null>(null)
   const dragRef = useRef<DragState | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
+  const [select, setSelect] = useState<SelectState | null>(null)
+  const selectRef = useRef<SelectState | null>(null)
+  const selectCleanupRef = useRef<(() => void) | null>(null)
   const innerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
@@ -118,7 +96,7 @@ export default function DayView(props: Props) {
       const end = t.end ? toMinutes(t.end) : start + DEFAULT_DURATION
       return { task: t, start, end: end > start ? end : start + DEFAULT_DURATION }
     })
-  const timed = layoutTimed(timedSource)
+  const timed = markConflicts(timedSource)
   const untimed = dayTasks.filter((t) => !(t.planDate === props.date && t.start))
 
   useEffect(() => {
@@ -127,6 +105,7 @@ export default function DayView(props: Props) {
   }, [props.date])
 
   useEffect(() => () => cleanupRef.current?.(), [])
+  useEffect(() => () => selectCleanupRef.current?.(), [])
 
   // 新建事项后滚动到它出现的位置
   useEffect(() => {
@@ -226,6 +205,62 @@ export default function DayView(props: Props) {
     props.onAddAt(props.date, toTime(minutes), toTime(minutes + DEFAULT_DURATION))
   }
 
+  const snapMinutes = (y: number): number =>
+    clamp(Math.round((y / HOUR_HEIGHT) * 60 / SNAP) * SNAP, 0, 24 * 60)
+
+  /** 在空白时间轴上按下并拖拽，圈选一段固定时间。 */
+  const beginSelect = (event: ReactMouseEvent) => {
+    if (event.button !== 0) return
+    if ((event.target as HTMLElement).closest('.tl-event')) return
+    const el = innerRef.current
+    if (!el) return
+    // 贴近事项卡片边缘时不启动选区，避免抢走上下边界的缩放操作
+    const nearCard = Array.from(el.querySelectorAll<HTMLElement>('.tl-event')).some((node) => {
+      const r = node.getBoundingClientRect()
+      return (
+        event.clientX >= r.left - 4 &&
+        event.clientX <= r.right + 4 &&
+        event.clientY >= r.top - 4 &&
+        event.clientY <= r.bottom + 4
+      )
+    })
+    if (nearCard) return
+    event.preventDefault()
+    const rect = el.getBoundingClientRect()
+    const startMin = snapMinutes(event.clientY - rect.top)
+    const first: SelectState = { startMin, curMin: startMin, dragging: false }
+    selectRef.current = first
+    setSelect(first)
+
+    const onMove = (ev: MouseEvent) => {
+      const current = selectRef.current
+      if (!current) return
+      const curMin = snapMinutes(ev.clientY - rect.top)
+      if (curMin === current.curMin) return
+      const next: SelectState = { ...current, curMin, dragging: true }
+      selectRef.current = next
+      setSelect(next)
+    }
+
+    const finish = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', finish)
+      selectCleanupRef.current = null
+      const current = selectRef.current
+      selectRef.current = null
+      setSelect(null)
+      if (!current || !current.dragging) return
+      const from = Math.min(current.startMin, current.curMin)
+      const to = Math.max(current.startMin, current.curMin)
+      if (to - from < SNAP) return
+      props.onAddAt(props.date, toTime(from), toTime(to))
+    }
+
+    selectCleanupRef.current = finish
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', finish)
+  }
+
   const hours = Array.from({ length: 24 }, (_, i) => i)
 
   return (
@@ -303,6 +338,7 @@ export default function DayView(props: Props) {
             }}
             onDrop={onTimelineDrop}
             onDoubleClick={addFromTimeline}
+            onMouseDown={beginSelect}
           >
             {hours.map((h) => (
               <div className="tl-hour" key={h} style={{ top: h * HOUR_HEIGHT }}>
@@ -317,13 +353,28 @@ export default function DayView(props: Props) {
                 <i />
               </div>
             )}
+            {select && (
+              <div
+                className="tl-select"
+                style={{
+                  top: (Math.min(select.startMin, select.curMin) / 60) * HOUR_HEIGHT,
+                  height: Math.max(2, (Math.abs(select.curMin - select.startMin) / 60) * HOUR_HEIGHT),
+                }}
+              >
+                <span className="tl-select-label">
+                  {toTime(Math.min(select.startMin, select.curMin))}
+                  {select.dragging
+                    ? ` – ${toTime(Math.max(select.startMin, select.curMin))}`
+                    : ' 开始'}
+                </span>
+              </div>
+            )}
             {timed.map((item) => {
               const preview = drag && drag.taskId === item.task.id ? drag : null
               const start = preview ? preview.previewStart : item.start
               const end = preview ? preview.previewEnd : item.end
               const top = (start / 60) * HOUR_HEIGHT
               const height = Math.max(24, ((end - start) / 60) * HOUR_HEIGHT)
-              const width = 100 / item.laneCount
               const size = height < 36 ? ' compact' : height < 56 ? ' mid' : ''
               const project = props.projects.find((p) => p.id === item.task.projectId)
               return (
@@ -334,16 +385,12 @@ export default function DayView(props: Props) {
                     'tl-event g' +
                     (project?.shade ?? 0) +
                     (item.task.status === 'done' ? ' done' : '') +
+                    (item.conflict ? ' conflict' : '') +
                     (preview ? ' dragging' : '') +
                     (props.focusId === item.task.id ? ' flash' : '') +
                     size
                   }
-                  style={{
-                    top,
-                    height,
-                    left: `calc(${item.lane * width}% + 2px)`,
-                    width: `calc(${width}% - 4px)`,
-                  }}
+                  style={{ top, height, left: 2, right: 2 }}
                   onPointerDown={(e) => beginDrag(e, item, 'move')}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -352,22 +399,18 @@ export default function DayView(props: Props) {
                     onPointerDown={(e) => beginDrag(e, item, 'start')}
                     title="拖动调整开始时间"
                   />
-                  <div className="tl-event-title">{item.task.title}</div>
-                  <div className="tl-event-time">
-                    {toTime(start)} – {toTime(end)}
+                  <div className="tl-event-head">
+                    <span className="tl-event-title">{item.task.title}</span>
+                    {item.conflict && (
+                      <span className="tl-event-flag" title="与其它事项时间冲突">
+                        冲突
+                      </span>
+                    )}
+                    <span className="tl-event-time">
+                      {toTime(start)} – {toTime(end)}
+                    </span>
                   </div>
-                  <div className="tl-event-status">{STATUS[item.task.status]}</div>
                   <div className="tl-actions" onPointerDown={(e) => e.stopPropagation()}>
-                    <button
-                      className="tact-mini"
-                      title="编辑事项"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        props.onEdit(item.task.id)
-                      }}
-                    >
-                      ✎
-                    </button>
                     <button
                       className="tact-mini"
                       title={item.task.status === 'done' ? '标记为未处理' : '标记为已处理'}

@@ -1,9 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import type { DragEvent as ReactDragEvent } from 'react'
+import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react'
 import type { AiContext, Folder, Project, Scope, Task } from '../types'
 import type { DragPayload } from '../utils'
-import { getDragPayload, setDragPayload } from '../utils'
+import { getDragPayload, setDragPayload, taskStats } from '../utils'
+
+const MIN_W = 180
+const MAX_W = 460
+const DEFAULT_W = 290
 
 interface Props {
   projects: Project[]
@@ -29,10 +33,61 @@ interface Props {
   onExport: () => void
 }
 
+const loadWidth = (): number => {
+  try {
+    const saved = Number(localStorage.getItem('taskflow:sideW'))
+    if (saved >= MIN_W && saved <= MAX_W) return saved
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_W
+}
+
 export default function Sidebar(props: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [dragOver, setDragOver] = useState('')
   const [menu, setMenu] = useState<{ projectId: string; top: number; left: number } | null>(null)
+  const [sideW, setSideW] = useState<number>(loadWidth)
+  const asideRef = useRef<HTMLElement>(null)
+  const resizing = useRef(false)
+
+  // 持久化侧边栏宽度
+  useEffect(() => {
+    try {
+      localStorage.setItem('taskflow:sideW', String(sideW))
+    } catch {
+      /* ignore */
+    }
+  }, [sideW])
+
+  // 拖拽调整宽度的全局监听
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!resizing.current || !asideRef.current) return
+      const left = asideRef.current.getBoundingClientRect().left
+      const next = Math.min(MAX_W, Math.max(MIN_W, e.clientX - left))
+      setSideW(next)
+    }
+    const onUp = () => {
+      if (!resizing.current) return
+      resizing.current = false
+      document.body.style.userSelect = ''
+      document.body.style.cursor = ''
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+    return () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+  }, [])
+
+  const startResize = (e: ReactMouseEvent) => {
+    e.preventDefault()
+    resizing.current = true
+    document.body.style.userSelect = 'none'
+    document.body.style.cursor = 'col-resize'
+  }
 
   const toggleCollapse = (id: string) => {
     setCollapsed((prev) => {
@@ -71,8 +126,8 @@ export default function Sidebar(props: Props) {
   const activeProjects = props.projects.filter((p) => !p.archived)
   const archived = props.projects.filter((p) => p.archived)
   const archivedIds = new Set(archived.map((p) => p.id))
-  // 「全部事项」只统计当前可见（未归档项目）的事项数
-  const activeTaskCount = props.tasks.filter((t) => !archivedIds.has(t.projectId)).length
+  // 「全部事项」只统计当前可见（未归档项目）的事项，展示「未完成 / 总数」
+  const activeStats = taskStats(props.tasks.filter((t) => !archivedIds.has(t.projectId)))
 
   const guardDrag = (event: ReactDragEvent): boolean => {
     if ((event.target as HTMLElement).closest('button,input,.tree-chk')) {
@@ -83,20 +138,16 @@ export default function Sidebar(props: Props) {
   }
 
   return (
-    <aside className="sidebar">
-      <div className="usercard">
-        <div className="avatar">周</div>
-        <div>
-          <div className="un">周正义</div>
-          <div className="ur">我的工作台</div>
-        </div>
-      </div>
+    <aside ref={asideRef} className="sidebar" style={{ ['--side-w' as string]: `${sideW}px` }}>
       <div className="side-tools">
         <button className="btn btn-ghost" onClick={props.onToggleBatch}>
           ☑ 选择
         </button>
         <button className="btn btn-ghost" onClick={props.onExport}>
           导出
+        </button>
+        <button className="btn btn-ghost" onClick={props.onNewProject}>
+          ＋ 新建项目
         </button>
       </div>
       <div className="tree">
@@ -105,12 +156,12 @@ export default function Sidebar(props: Props) {
           onClick={() => props.onSelectScope(null)}
         >
           <span className="f-icon">▦</span>
-          <span style={{ flex: 1 }}>全部事项({activeTaskCount})</span>
+          <span style={{ flex: 1 }}>全部事项({activeStats.pending}/{activeStats.total})</span>
         </div>
 
         {activeProjects.map((p) => {
           const projectFolders = props.folders.filter((f) => f.projectId === p.id)
-          const projectTasks = props.tasks.filter((t) => t.projectId === p.id)
+          const projectStats = taskStats(props.tasks.filter((t) => t.projectId === p.id))
           const isOpen = !collapsed.has(p.id)
           return (
             <div key={p.id} className={'pnode' + (isOpen ? ' open' : '')}>
@@ -153,7 +204,7 @@ export default function Sidebar(props: Props) {
                 <button className="caret">▶</button>
                 <span className="dot" />
                 <span className="pname">
-                  {p.name}({projectTasks.length})
+                  {p.name}({projectStats.pending}/{projectStats.total})
                 </span>
                 <span className="row-actions">
                   <button
@@ -200,7 +251,7 @@ export default function Sidebar(props: Props) {
               </div>
               <div className="sub">
                 {projectFolders.map((f) => {
-                  const count = props.tasks.filter((t) => t.folderId === f.id).length
+                  const folderStats = taskStats(props.tasks.filter((t) => t.folderId === f.id))
                   return (
                     <div key={f.id} className="fnode">
                       <div
@@ -237,7 +288,7 @@ export default function Sidebar(props: Props) {
                         )}
                         <span className="f-icon">–</span>
                         <span style={{ flex: 1 }}>
-                          {f.name}({count})
+                          {f.name}({folderStats.pending}/{folderStats.total})
                         </span>
                         <span className="row-actions">
                           <button
@@ -301,12 +352,11 @@ export default function Sidebar(props: Props) {
         )}
       </div>
 
-      <button className="add-proj" onClick={props.onOpenSettings}>
+      <button className="add-proj side-foot" onClick={props.onOpenSettings}>
         ⚙ 设置
       </button>
-      <button className="add-proj" onClick={props.onNewProject}>
-        ＋ 新建项目
-      </button>
+
+      <div className="sidebar-resizer" onMouseDown={startResize} title="拖动调整侧边栏宽度" />
 
       {menu &&
         createPortal(

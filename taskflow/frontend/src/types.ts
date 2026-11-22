@@ -51,6 +51,7 @@ export interface Task {
   remark: string
   images: string[]
   attachments: Attachment[]
+  needReview: boolean
   sort: number
   createdAt: string
   completedAt: string
@@ -128,6 +129,7 @@ export interface TaskInput {
   remark: string
   images: string[]
   attachments: Attachment[]
+  needReview: boolean
 }
 
 export interface TaskDraft extends TaskInput {

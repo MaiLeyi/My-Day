@@ -81,6 +81,7 @@ export default function AiModal(props: Props) {
           remark: '',
           images: [],
           attachments: [],
+          needReview: false,
         })
       }
       props.onCreated(`已录入 ${picked.length} 条`)

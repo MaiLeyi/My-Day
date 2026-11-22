@@ -41,6 +41,7 @@ CREATE TABLE IF NOT EXISTS tasks (
   remark TEXT NOT NULL DEFAULT '',
   images TEXT NOT NULL DEFAULT '[]',
   attachments TEXT NOT NULL DEFAULT '[]',
+  need_review INTEGER NOT NULL DEFAULT 0,
   sort INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   completed_at TEXT NOT NULL DEFAULT ''
@@ -77,10 +78,19 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
+    """若列不存在则追加（SQLite 轻量迁移，幂等）。"""
+    cols = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
 def init_db() -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA)
+        # 增量迁移：为旧库补齐 need_review 列
+        _ensure_column(conn, "tasks", "need_review", "need_review INTEGER NOT NULL DEFAULT 0")
         # 状态由三态（todo/doing/done）收敛为两态（todo/done），历史“进行中”归为未处理
         conn.execute("UPDATE tasks SET status = 'todo' WHERE status NOT IN ('todo', 'done')")
         _purge_legacy_seed(conn)

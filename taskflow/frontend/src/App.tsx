@@ -3,10 +3,10 @@ import { api } from './api'
 import AiModal from './components/AiModal'
 import ConfirmDialog from './components/ConfirmDialog'
 import type { AskConfirmOptions } from './components/ConfirmDialog'
-import DateField from './components/DateField'
 import DayView from './components/DayView'
 import DetailModal from './components/DetailModal'
 import ExportModal from './components/ExportModal'
+import FilterBar from './components/FilterBar'
 import ListView from './components/ListView'
 import MonthView from './components/MonthView'
 import MoveModal from './components/MoveModal'
@@ -49,6 +49,7 @@ const newDraft = (projects: Bootstrap['projects'], opts: { projectId?: string; f
   remark: '',
   images: [],
   attachments: [],
+  needReview: false,
 })
 
 export default function App() {
@@ -83,11 +84,11 @@ export default function App() {
   const [query, setQuery] = useState('')
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [showDone, setShowDone] = useState(false)
+  const [keepDoneIds, setKeepDoneIds] = useState<Set<string>>(new Set())
   const [dateFilter, setDateFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState<'' | Priority>('')
   const [overdueOnly, setOverdueOnly] = useState(false)
   const [prioritySort, setPrioritySort] = useState(false)
-  const [listLayout, setListLayout] = useState<'group' | 'flat'>('group')
   const [batchMode, setBatchMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [monthCursor, setMonthCursor] = useState(new Date())
@@ -166,7 +167,7 @@ export default function App() {
 
   const listTasks = tasks.filter((t) => {
     if (!matchStatus(t) || !inScope(t)) return false
-    if (statusFilter !== 'done' && !showDone && t.status === 'done') return false
+    if (statusFilter !== 'done' && !showDone && t.status === 'done' && !keepDoneIds.has(t.id)) return false
     if (archivedIds.has(t.projectId)) return false
     if (dateFilter && statusFilter !== 'unplanned' && !(t.planDate === dateFilter || t.dueDate === dateFilter))
       return false
@@ -190,13 +191,20 @@ export default function App() {
     : ''
 
   // ---- 通用操作 ----
-  const selectScope = (next: Scope | null) => {
-    setScope(next)
-    setDateFilter('')
+  // 注意：此处位于 `if (!data) return` 之后，只能定义普通函数，不能调用 Hook
+  // （如 useCallback），否则会因条件渲染导致 Hook 数量变化而崩溃。
+  const resetFilters = () => {
     setStatusFilter('all')
     setShowDone(false)
+    setDateFilter('')
     setPriorityFilter('')
     setOverdueOnly(false)
+    setPrioritySort(false)
+  }
+
+  const selectScope = (next: Scope | null) => {
+    setScope(next)
+    resetFilters()
     setNavOpen(false)
   }
 
@@ -268,6 +276,34 @@ export default function App() {
     try {
       await api.updateTask(task.id, { status: next })
       await reload(next === 'done' ? '已处理' : '已恢复为未处理')
+      // 完成后若会被筛选隐藏，先短暂保留以展示"已完成"态，再淡出移除，避免瞬间消失
+      const willHide = next === 'done' && statusFilter !== 'done' && !showDone
+      if (willHide) {
+        setKeepDoneIds((prev) => new Set(prev).add(task.id))
+        window.setTimeout(() => {
+          setKeepDoneIds((prev) => {
+            const n = new Set(prev)
+            n.delete(task.id)
+            return n
+          })
+        }, 600)
+      } else {
+        setKeepDoneIds((prev) => {
+          if (!prev.has(task.id)) return prev
+          const n = new Set(prev)
+          n.delete(task.id)
+          return n
+        })
+      }
+    } catch (err) {
+      showToast((err as Error).message)
+    }
+  }
+
+  const toggleReview = async (task: Task) => {
+    try {
+      await api.updateTask(task.id, { needReview: !task.needReview })
+      await reload(task.needReview ? '已取消待复盘' : '已标记待复盘')
     } catch (err) {
       showToast((err as Error).message)
     }
@@ -485,71 +521,23 @@ export default function App() {
                     范围：{scopeName} ✕
                   </button>
                 )}
-                {view === 'list' && !scope && (
-                  <div className="layout-toggle">
-                    <button className={listLayout === 'group' ? 'active' : ''} onClick={() => setListLayout('group')}>
-                      分层
-                    </button>
-                    <button className={listLayout === 'flat' ? 'active' : ''} onClick={() => setListLayout('flat')}>
-                      平铺
-                    </button>
-                  </div>
-                )}
                 <div className="spacer" />
                 {view === 'list' && (
-                  <>
-                    <DateField
-                      value={dateFilter}
-                      onChange={setDateFilter}
-                      placeholder="按日期筛选"
-                      clearable
-                      compact
-                      align="right"
-                    />
-                    <div className="chips">
-                      {(
-                        [
-                          ['all', '全部'],
-                          ['todo', '未处理'],
-                          ['done', '已处理'],
-                          ['unplanned', '未排期'],
-                        ] as [StatusFilter, string][]
-                      ).map(([key, label]) => (
-                        <button
-                          key={key}
-                          className={'chip' + (statusFilter === key ? ' active' : '')}
-                          onClick={() => setStatusFilter(key)}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                      <label className="show-done">
-                        <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
-                        展示已处理
-                      </label>
-                    </div>
-                    <select
-                      className="date-filter"
-                      value={priorityFilter}
-                      onChange={(e) => setPriorityFilter(e.target.value as '' | Priority)}
-                    >
-                      <option value="">全部优先级</option>
-                      <option value="high">高优先级</option>
-                      <option value="mid">中优先级</option>
-                      <option value="low">低优先级</option>
-                    </select>
-                    <label className="show-done">
-                      <input type="checkbox" checked={overdueOnly} onChange={(e) => setOverdueOnly(e.target.checked)} />
-                      仅看逾期
-                    </label>
-                    <button
-                      className={'chip' + (prioritySort ? ' active' : '')}
-                      onClick={() => setPrioritySort((v) => !v)}
-                      title="按优先级高低排序"
-                    >
-                      优先级排序
-                    </button>
-                  </>
+                  <FilterBar
+                    statusFilter={statusFilter}
+                    showDone={showDone}
+                    dateFilter={dateFilter}
+                    priorityFilter={priorityFilter}
+                    overdueOnly={overdueOnly}
+                    prioritySort={prioritySort}
+                    onStatusFilter={setStatusFilter}
+                    onShowDone={setShowDone}
+                    onDateFilter={setDateFilter}
+                    onPriorityFilter={setPriorityFilter}
+                    onOverdueOnly={setOverdueOnly}
+                    onPrioritySort={setPrioritySort}
+                    onReset={resetFilters}
+                  />
                 )}
               </div>
             )}
@@ -559,8 +547,6 @@ export default function App() {
                 tasks={listTasks}
                 projects={projects}
                 folders={folders}
-                flat={listLayout === 'flat'}
-                scopeActive={!!scope}
                 prioritySort={prioritySort}
                 batchMode={batchMode}
                 selected={selected}
@@ -571,6 +557,8 @@ export default function App() {
                 onEdit={openEdit}
                 onToggleStatus={toggleStatus}
                 onDeleteTask={askDeleteTask}
+                onToggleReview={toggleReview}
+                isLeaving={(id) => keepDoneIds.has(id)}
               />
             )}
 
@@ -599,21 +587,18 @@ export default function App() {
                 offset={weekOffset}
                 tasks={boardTasks}
                 projects={projects}
-                folders={folders}
-                selDay={selDay}
-                batchMode={batchMode}
-                selected={selected}
+                focusId={focusId}
                 onPrev={() => setWeekOffset((v) => v - 1)}
                 onNext={() => setWeekOffset((v) => v + 1)}
                 onBack={() => setWeekOffset(0)}
-                onSelectDay={setSelDay}
+                onOpenDay={(iso) => {
+                  setDayDate(iso)
+                  setView('day')
+                }}
                 onAddDay={addOnDay}
-                focusId={focusId}
+                onAddAt={addOnDayAt}
                 onOpen={openTask}
-                onToggleSelect={(id) => toggleSel('t', id)}
-                onSchedule={schedule}
-                onDropTask={dropTaskOnTask}
-                onEdit={openEdit}
+                onScheduleRange={updateTaskTime}
                 onToggleStatus={toggleStatus}
                 onDeleteTask={askDeleteTask}
               />
@@ -634,7 +619,6 @@ export default function App() {
                 onOpen={openTask}
                 onToggleSelect={(id) => toggleSel('t', id)}
                 onDropTask={dropTaskOnTask}
-                onEdit={openEdit}
                 onToggleStatus={toggleStatus}
                 onDeleteTask={askDeleteTask}
               />

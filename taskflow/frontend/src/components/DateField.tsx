@@ -5,6 +5,10 @@ import { fmt, monthCells, parseDate, today } from '../utils'
 interface Props {
   value: string
   onChange: (value: string) => void
+  start?: string
+  end?: string
+  onStartChange?: (value: string) => void
+  onEndChange?: (value: string) => void
   placeholder?: string
   clearable?: boolean
   compact?: boolean
@@ -39,6 +43,10 @@ export default function DateField(props: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
   const popRef = useRef<HTMLDivElement>(null)
+  const hasTime = !!(props.onStartChange && props.onEndChange)
+  const timeText = hasTime && (props.start || props.end) ? `${props.start || '--:--'} – ${props.end || '--:--'}` : ''
+  const valueText = [props.value ? display(props.value) : '', timeText].filter(Boolean).join(' ')
+  const hasValue = !!valueText
 
   useEffect(() => {
     if (!open) return
@@ -70,8 +78,9 @@ export default function DateField(props: Props) {
       if (rect) {
         let left = props.align === 'right' ? rect.right - POP_WIDTH : rect.left
         left = Math.max(8, Math.min(left, window.innerWidth - POP_WIDTH - 8))
+        const popHeight = hasTime ? 390 : POP_HEIGHT
         let top = rect.bottom + 6
-        if (top + POP_HEIGHT > window.innerHeight - 8) top = Math.max(8, rect.top - POP_HEIGHT - 6)
+        if (top + popHeight > window.innerHeight - 8) top = Math.max(8, rect.top - popHeight - 6)
         setPos({ top, left })
       }
     }
@@ -80,6 +89,15 @@ export default function DateField(props: Props) {
 
   const pick = (iso: string) => {
     props.onChange(iso)
+    if (!hasTime) setOpen(false)
+  }
+
+  const clear = () => {
+    props.onChange('')
+    if (hasTime) {
+      props.onStartChange?.('')
+      props.onEndChange?.('')
+    }
     setOpen(false)
   }
 
@@ -97,22 +115,21 @@ export default function DateField(props: Props) {
       <button
         ref={btnRef}
         type="button"
-        className={'datefield-btn' + (props.value ? ' has-value' : '')}
+        className={'datefield-btn' + (hasValue ? ' has-value' : '')}
         onClick={toggle}
       >
         <span className="df-icon">▦</span>
-        <span className={'df-text' + (props.value ? '' : ' placeholder')}>
-          {props.value ? display(props.value) : props.placeholder || '选择日期'}
+        <span className={'df-text' + (hasValue ? '' : ' placeholder')}>
+          {hasValue ? valueText : props.placeholder || '选择日期'}
         </span>
-        {props.clearable && props.value && (
+        {props.clearable && hasValue && (
           <span
             className="df-clear"
             role="button"
-            title="清除日期"
+            title={hasTime ? '清除日期与时间' : '清除日期'}
             onClick={(e) => {
               e.stopPropagation()
-              props.onChange('')
-              setOpen(false)
+              clear()
             }}
           >
             ×
@@ -166,16 +183,43 @@ export default function DateField(props: Props) {
                 </button>
               ))}
             </div>
+            {hasTime && (
+              <div className="dp-times">
+                <label className="dp-time">
+                  <span>开始</span>
+                  <input
+                    type="time"
+                    value={props.start || ''}
+                    onChange={(e) => props.onStartChange?.(e.target.value)}
+                  />
+                </label>
+                <label className="dp-time">
+                  <span>结束</span>
+                  <input
+                    type="time"
+                    value={props.end || ''}
+                    onChange={(e) => props.onEndChange?.(e.target.value)}
+                  />
+                </label>
+              </div>
+            )}
             <div className="dp-foot">
               <button type="button" onClick={() => pick(today())}>
                 今天
               </button>
-              <button type="button" onClick={() => pick(shiftMonth(props.value || today(), 1))}>
-                下月同日
-              </button>
+              {!hasTime && (
+                <button type="button" onClick={() => pick(shiftMonth(props.value || today(), 1))}>
+                  下月同日
+                </button>
+              )}
               {props.clearable && (
-                <button type="button" className="dp-clear" onClick={() => pick('')}>
+                <button type="button" className="dp-clear" onClick={clear}>
                   清除
+                </button>
+              )}
+              {hasTime && (
+                <button type="button" onClick={() => setOpen(false)}>
+                  完成
                 </button>
               )}
             </div>

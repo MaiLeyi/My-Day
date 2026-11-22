@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react'
 import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { Attachment, Folder, Project, Status, Task, TaskDraft, TaskInput } from '../types'
-import { PRIORITY_LABEL, PRIORITY_OPTIONS, STATUS, isOverdue } from '../utils'
+import { PRIORITY_LABEL, STATUS, isOverdue } from '../utils'
 import { api } from '../api'
 import type { AskConfirm } from './ConfirmDialog'
 import DateField from './DateField'
@@ -39,6 +39,7 @@ const emptyDraft = (task: Task | null, projects: Project[]): TaskDraft => ({
   remark: task?.remark || '',
   images: [...(task?.images || [])],
   attachments: [...(task?.attachments || [])],
+  needReview: task?.needReview ?? false,
 })
 
 function formatSize(size: number): string {
@@ -52,9 +53,8 @@ export default function DetailModal(props: Props) {
   const [mode, setMode] = useState<'view' | 'edit'>(props.mode)
   const [draft, setDraft] = useState<TaskDraft>(() => props.draft || emptyDraft(props.task, props.projects))
   const [editing, setEditing] = useState<{ field: ViewField; value: string } | null>(null)
-  const [mediaOpen, setMediaOpen] = useState(false)
-  const [remarkOpen, setRemarkOpen] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(false)
+  const [mediaOpen, setMediaOpen] = useState(() => !!(draft.images.length || draft.attachments.length))
+  const [remarkOpen, setRemarkOpen] = useState(() => !!draft.remark)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<'' | 'image' | 'file'>('')
   const [lightbox, setLightbox] = useState<number | null>(null)
@@ -115,7 +115,6 @@ export default function DetailModal(props: Props) {
     setErrors({})
     setMediaOpen(!!(task.images.length || task.attachments.length))
     setRemarkOpen(!!task.remark)
-    setDetailsOpen(true)
     setMode('edit')
   }
 
@@ -161,6 +160,7 @@ export default function DetailModal(props: Props) {
       remark: draft.remark,
       images: draft.images,
       attachments: draft.attachments,
+      needReview: draft.needReview,
     }
     try {
       const saved = draft.id ? await api.updateTask(draft.id, payload) : await api.createTask(payload)
@@ -292,6 +292,7 @@ export default function DetailModal(props: Props) {
             <div className="d-badges">
               {task.priority && <span className="badge">优先级·{PRIORITY_LABEL[task.priority]}</span>}
               {overdue && <span className="badge b-ink">已逾期</span>}
+              {task.needReview && <span className="badge b-ink">待复盘</span>}
             </div>
             <div className="sec-label">描述</div>
             {editing?.field === 'desc' ? (
@@ -440,6 +441,63 @@ export default function DetailModal(props: Props) {
               />
               {errors.title && <div className="field-error">{errors.title}</div>}
             </div>
+            <div className="ed-grid">
+              <div className="ed-field">
+                <label>项目</label>
+                <select
+                  value={draft.projectId}
+                  onChange={(e) => patchDraft({ projectId: e.target.value, folderId: '' })}
+                >
+                  {props.projects
+                    .filter((p) => !p.archived)
+                    .map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  {draft.projectId === '' && <option value="">未归类</option>}
+                </select>
+              </div>
+              <div className="ed-field">
+                <label>分组</label>
+                <select
+                  value={draft.folderId}
+                  disabled={!draft.projectId}
+                  title={!draft.projectId ? '请先选择项目' : undefined}
+                  onChange={(e) => patchDraft({ folderId: e.target.value })}
+                >
+                  <option value="">未分组</option>
+                  {foldersOfDraftProject.map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="ed-field">
+              <label>安排日期与时间（时间填写后会进入日程时间轴）</label>
+              <DateField
+                value={draft.planDate}
+                start={draft.start}
+                end={draft.end}
+                clearable
+                placeholder="选择日期与时间"
+                onChange={(value) => {
+                  patchDraft({ planDate: value })
+                  if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
+                }}
+                onStartChange={(value) => {
+                  patchDraft({ start: value })
+                  if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
+                }}
+                onEndChange={(value) => {
+                  patchDraft({ end: value })
+                  if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
+                }}
+              />
+            </div>
+            {errors.time && <div className="field-error schedule-error">{errors.time}</div>}
             <div className="ed-field">
               <label>事项描述（文字，可不填）</label>
               <textarea
@@ -448,14 +506,34 @@ export default function DetailModal(props: Props) {
                 onChange={(e) => patchDraft({ desc: e.target.value })}
               />
             </div>
-            <div className="ed-field">
-              <button className="add-chip" onClick={() => setMediaOpen((v) => !v)}>
-                {draft.images.length || draft.attachments.length || mediaOpen
-                  ? '收起图片 / 附件'
-                  : '＋ 图片 / 附件（可选）'}
+            <div className="editor-tools">
+              <button
+                type="button"
+                className={'editor-tool' + (mediaOpen ? ' active' : '')}
+                title="图片 / 附件"
+                aria-label="图片 / 附件"
+                aria-expanded={mediaOpen}
+                onClick={() => setMediaOpen((v) => !v)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                className={'editor-tool' + (remarkOpen ? ' active' : '')}
+                title="备注"
+                aria-label="备注"
+                aria-expanded={remarkOpen}
+                onClick={() => setRemarkOpen((v) => !v)}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+                  <path d="M14 2v6h6M8 13h8M8 17h5" />
+                </svg>
               </button>
             </div>
-            {(draft.images.length > 0 || draft.attachments.length > 0 || mediaOpen) && (
+            {mediaOpen && (
               <div>
                 <div className="attach-row">
                   <button className="add-chip" onClick={() => imgRef.current?.click()} disabled={!!uploading}>
@@ -516,13 +594,8 @@ export default function DetailModal(props: Props) {
                 <div className="img-hint">图片和附件会保存到本地数据目录，删除事项时一并清理。</div>
               </div>
             )}
-            <div className="ed-field" style={{ marginTop: 10 }}>
-              <button className="add-chip" onClick={() => setRemarkOpen((v) => !v)}>
-                {draft.remark || remarkOpen ? '收起备注' : '＋ 添加备注（可选，默认收起）'}
-              </button>
-            </div>
-            {(draft.remark || remarkOpen) && (
-              <div className="ed-field">
+            {remarkOpen && (
+              <div className="ed-field remark-editor">
                 <textarea
                   value={draft.remark}
                   placeholder="备注：补充说明，仅自己可见"
@@ -530,112 +603,6 @@ export default function DetailModal(props: Props) {
                 />
               </div>
             )}
-            <div className="ed-field">
-              <label>安排日期与时间（时间填写后会进入日程时间轴）</label>
-              <DateField
-                value={draft.planDate}
-                clearable
-                placeholder="选择计划日"
-                onChange={(value) => {
-                  patchDraft({ planDate: value })
-                  if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
-                }}
-              />
-            </div>
-            <div className="ed-grid">
-              <div className="ed-field">
-                <label>开始</label>
-                <input
-                  type="time"
-                  value={draft.start}
-                  onChange={(e) => {
-                    patchDraft({ start: e.target.value })
-                    if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
-                  }}
-                />
-              </div>
-              <div className="ed-field">
-                <label>结束</label>
-                <input
-                  type="time"
-                  value={draft.end}
-                  onChange={(e) => {
-                    patchDraft({ end: e.target.value })
-                    if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
-                  }}
-                />
-              </div>
-            </div>
-            {errors.time && <div className="field-error">{errors.time}</div>}
-            <details
-              className="ed-field"
-              style={{ marginTop: 6 }}
-              open={detailsOpen}
-              onToggle={(e) => setDetailsOpen(e.currentTarget.open)}
-            >
-              <summary className="link-btn">更多属性（可选）</summary>
-              <div className="ed-grid" style={{ marginTop: 8 }}>
-                <div className="ed-field">
-                  <label>状态</label>
-                  <select
-                    value={draft.status}
-                    onChange={(e) => patchDraft({ status: e.target.value as Status })}
-                  >
-                    <option value="todo">未处理</option>
-                    <option value="done">已处理</option>
-                  </select>
-                </div>
-                <div className="ed-field">
-                  <label>优先级</label>
-                  <select
-                    value={draft.priority}
-                    onChange={(e) => patchDraft({ priority: e.target.value as Task['priority'] })}
-                  >
-                    {PRIORITY_OPTIONS.map((o) => (
-                      <option key={o.value} value={o.value}>
-                        {o.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="ed-field">
-                  <label>截止日</label>
-                  <DateField
-                    value={draft.dueDate}
-                    clearable
-                    placeholder="选择截止日"
-                    onChange={(value) => patchDraft({ dueDate: value })}
-                  />
-                </div>
-                <div className="ed-field">
-                  <label>项目</label>
-                  <select
-                    value={draft.projectId}
-                    onChange={(e) => patchDraft({ projectId: e.target.value, folderId: '' })}
-                  >
-                    {props.projects
-                      .filter((p) => !p.archived)
-                      .map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    {draft.projectId === '' && <option value="">未归类</option>}
-                  </select>
-                </div>
-                <div className="ed-field">
-                  <label>分组</label>
-                  <select value={draft.folderId} onChange={(e) => patchDraft({ folderId: e.target.value })}>
-                    <option value="">未分组</option>
-                    {foldersOfDraftProject.map((f) => (
-                      <option key={f.id} value={f.id}>
-                        {f.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </details>
             <div className="d-foot">
               <button className="btn btn-ghost" onClick={close}>
                 取消

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { Folder, Project, Task } from '../types'
 import { PRIORITY_RANK, byDate } from '../utils'
 import TaskRow from './TaskRow'
@@ -6,8 +7,6 @@ interface Props {
   tasks: Task[]
   projects: Project[]
   folders: Folder[]
-  flat: boolean
-  scopeActive: boolean
   prioritySort: boolean
   batchMode: boolean
   selected: Set<string>
@@ -18,9 +17,21 @@ interface Props {
   onEdit: (id: string) => void
   onToggleStatus: (task: Task) => void
   onDeleteTask: (task: Task) => void
+  onToggleReview: (task: Task) => void
+  isLeaving?: (id: string) => boolean
 }
 
 export default function ListView(props: Props) {
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
+
+  const toggle = (id: string) =>
+    setCollapsed((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
   const sortTasks = (list: Task[]) =>
     list.slice().sort((a, b) => {
       if (props.prioritySort) {
@@ -48,6 +59,8 @@ export default function ListView(props: Props) {
           onEdit={props.onEdit}
           onToggleStatus={props.onToggleStatus}
           onDeleteTask={props.onDeleteTask}
+          onToggleReview={props.onToggleReview}
+          leaving={props.isLeaving?.(t.id)}
         />
       ))}
     </div>
@@ -65,10 +78,6 @@ export default function ListView(props: Props) {
     )
   }
 
-  if (!props.scopeActive && props.flat) {
-    return <div className="listview">{rows(props.tasks, true)}</div>
-  }
-
   const byProject = new Map<string, Task[]>()
   props.tasks.forEach((t) => {
     const list = byProject.get(t.projectId) || []
@@ -80,6 +89,7 @@ export default function ListView(props: Props) {
     <div className="listview">
       {[...byProject.entries()].map(([pid, list]) => {
         const project = props.projects.find((p) => p.id === pid)
+        const isOpen = !collapsed.has(pid)
         const byFolder = new Map<string, Task[]>()
         const loose: Task[] = []
         list.forEach((t) => {
@@ -92,21 +102,29 @@ export default function ListView(props: Props) {
           byFolder.set(t.folderId, arr)
         })
         return (
-          <div key={pid}>
-            <div className="group-title">
-              <span className="dot" style={{ background: 'var(--gray3)' }} />
-              {project?.name || '未归类'}
+          <div key={pid} className={'grp' + (isOpen ? ' open' : '')}>
+            <div className="grp-head" onClick={() => toggle(pid)}>
+              <span className="caret">▶</span>
+              <span className={'grp-icon shade-' + (project?.shade ?? 0)}>
+                {(project?.name || '未').charAt(0)}
+              </span>
+              <span className="grp-name">{project?.name || '未归类'}</span>
+              <span className="grp-count">{list.length}</span>
             </div>
-            {[...byFolder.entries()].map(([fid, folderTasks]) => {
-              const folder = props.folders.find((f) => f.id === fid)
-              return (
-                <div key={fid}>
-                  <div className="sub-group-title">{folder?.name || '未分组'}</div>
-                  {rows(folderTasks)}
-                </div>
-              )
-            })}
-            {rows(loose)}
+            {isOpen && (
+              <div className="grp-body">
+                {[...byFolder.entries()].map(([fid, folderTasks]) => {
+                  const folder = props.folders.find((f) => f.id === fid)
+                  return (
+                    <div key={fid}>
+                      <div className="sub-group-title">{folder?.name || '未分组'}</div>
+                      {rows(folderTasks)}
+                    </div>
+                  )
+                })}
+                {rows(loose)}
+              </div>
+            )}
           </div>
         )
       })}

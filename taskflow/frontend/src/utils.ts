@@ -31,6 +31,25 @@ export function byDate(a: Task, b: Task): number {
   return (a.planDate || '9999-99-99').localeCompare(b.planDate || '9999-99-99')
 }
 
+/** 统计一组事项的「未完成 / 总数」，用于侧栏数量展示。 */
+export function taskStats(tasks: Task[]): { pending: number; total: number } {
+  const total = tasks.length
+  const pending = tasks.filter((t) => t.status !== 'done').length
+  return { pending, total }
+}
+
+/** 标记与同一视图内其它时段重叠的事项，用于提示时间冲突。 */
+export function markConflicts<T extends { start: number; end: number }>(
+  items: T[],
+): (T & { conflict: boolean })[] {
+  return items.map((item) => ({
+    ...item,
+    conflict: items.some(
+      (other) => other !== item && other.start < item.end && item.start < other.end,
+    ),
+  }))
+}
+
 export type DragPayload =
   | { type: 'task'; id: string }
   | { type: 'project'; id: string }

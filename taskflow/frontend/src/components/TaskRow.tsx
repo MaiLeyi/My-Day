@@ -16,6 +16,7 @@ interface Props {
   folders: Folder[]
   showPath?: boolean
   flash?: boolean
+  leaving?: boolean
   batchMode: boolean
   selected: boolean
   onOpen: (id: string) => void
@@ -25,6 +26,7 @@ interface Props {
   onToggleStatus: (task: Task) => void
   onDeleteTask: (task: Task) => void
   onSchedule?: (id: string, iso: string) => void
+  onToggleReview?: (task: Task) => void
 }
 
 function shiftDay(iso: string, delta: number): string {
@@ -60,7 +62,8 @@ export default function TaskRow(props: Props) {
         'trow' +
         (task.status === 'done' ? ' done' : '') +
         (dragOver ? ' drag-over' : '') +
-        (props.flash ? ' flash' : '')
+        (props.flash ? ' flash' : '') +
+        (props.leaving ? ' leaving' : '')
       }
       draggable={!props.batchMode}
       onDragStart={() => setDragPayload({ type: 'task', id: task.id })}
@@ -74,13 +77,26 @@ export default function TaskRow(props: Props) {
       onDragLeave={() => setDragOver(false)}
       onDrop={drop}
       onClick={(e) => {
-        if ((e.target as HTMLElement).closest('.chk,.sdot,.tact,.quick-sched')) return
+        if ((e.target as HTMLElement).closest('.chk,.sbox,.tact,.quick-sched')) return
         props.onOpen(task.id)
       }}
     >
+      <button
+        className={'sbox ' + task.status}
+        title={task.status === 'done' ? '标记为未处理' : '标记为已处理'}
+        onClick={(e) => {
+          e.stopPropagation()
+          props.onToggleStatus(task)
+        }}
+      >
+        {task.status === 'done' ? '✓' : ''}
+      </button>
       <div className={'pri ' + (task.priority || '')} title={'优先级：' + PRIORITY_LABEL[task.priority || '']} />
       <div className="tbody">
-        <div className="ttitle">{task.title}</div>
+        <div className="ttitle">
+          {task.needReview && <span className="review-dot" title="待复盘">⚑</span>}
+          {task.title}
+        </div>
         <div className="tmeta">
           {task.planDate ? <span>{task.planDate}</span> : <span style={{ color: 'var(--sub2)' }}>未排期</span>}
           {task.start && (
@@ -94,6 +110,16 @@ export default function TaskRow(props: Props) {
       <div className="tright">
         {!props.batchMode && (
           <div className="trow-actions">
+          <button
+            className={'tact review-btn' + (task.needReview ? ' active' : '')}
+            title={task.needReview ? '取消待复盘' : '标记待复盘'}
+            onClick={(e) => {
+              e.stopPropagation()
+              props.onToggleReview?.(task)
+            }}
+          >
+            ⚑
+          </button>
           <button
             className="tact"
             title="编辑事项"
@@ -126,7 +152,7 @@ export default function TaskRow(props: Props) {
           </button>
           </div>
         )}
-        {props.batchMode ? (
+        {props.batchMode && (
           <input
             type="checkbox"
             className="chk"
@@ -134,17 +160,6 @@ export default function TaskRow(props: Props) {
             onChange={() => props.onToggleSelect(task.id)}
             onClick={(e) => e.stopPropagation()}
           />
-        ) : (
-          <button
-            className={'sdot ' + task.status}
-            title={task.status === 'done' ? '标记为未处理' : '标记为已处理'}
-            onClick={(e) => {
-              e.stopPropagation()
-              props.onToggleStatus(task)
-            }}
-          >
-            {task.status === 'done' ? '✓' : ''}
-          </button>
         )}
       </div>
       {schedOpen && (

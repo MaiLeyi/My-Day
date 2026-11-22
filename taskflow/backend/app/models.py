@@ -31,6 +31,7 @@ class TaskBase(BaseModel):
     remark: str = ""
     images: list[str] = Field(default_factory=list)
     attachments: list[Attachment] = Field(default_factory=list)
+    needReview: bool = False
 
 
 class TaskCreate(TaskBase):
@@ -51,6 +52,7 @@ class TaskUpdate(BaseModel):
     remark: Optional[str] = None
     images: Optional[list[str]] = None
     attachments: Optional[list[Attachment]] = None
+    needReview: Optional[bool] = None
 
 
 class ProjectCreate(BaseModel):
