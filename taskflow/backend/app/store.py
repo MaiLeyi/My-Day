@@ -23,7 +23,7 @@ from .models import (
 )
 
 PRIORITY_LABEL = {"high": "高", "mid": "中", "low": "低", "": "无"}
-STATUS_LABEL = {"todo": "待办", "doing": "进行中", "done": "已完成"}
+STATUS_LABEL = {"todo": "未处理", "done": "已处理"}
 
 # 附件文件统一放在数据库同级的 files 目录，便于整体备份/迁移
 FILES_DIR = DB_PATH.parent / "files"

@@ -16,6 +16,7 @@ interface Props {
   folders: Folder[]
   onClose: () => void
   onChanged: (message?: string) => void
+  onSaved?: (task: Task) => void
   onToast: (message: string) => void
   onMove: (taskId: string) => void
   onConfirm: AskConfirm
@@ -53,7 +54,7 @@ export default function DetailModal(props: Props) {
   const [editing, setEditing] = useState<{ field: ViewField; value: string } | null>(null)
   const [mediaOpen, setMediaOpen] = useState(false)
   const [remarkOpen, setRemarkOpen] = useState(false)
-  const [detailsOpen, setDetailsOpen] = useState(props.mode === 'edit' && !!props.draft?.planDate)
+  const [detailsOpen, setDetailsOpen] = useState(false)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<'' | 'image' | 'file'>('')
   const [lightbox, setLightbox] = useState<number | null>(null)
@@ -162,9 +163,9 @@ export default function DetailModal(props: Props) {
       attachments: draft.attachments,
     }
     try {
-      if (draft.id) await api.updateTask(draft.id, payload)
-      else await api.createTask(payload)
+      const saved = draft.id ? await api.updateTask(draft.id, payload) : await api.createTask(payload)
       props.onChanged('已保存')
+      props.onSaved?.(saved)
       close()
     } catch (err) {
       props.onToast((err as Error).message)
@@ -278,7 +279,7 @@ export default function DetailModal(props: Props) {
               </div>
             )}
             <div className="status-seg">
-              {(['todo', 'doing', 'done'] as Status[]).map((st) => (
+              {(['todo', 'done'] as Status[]).map((st) => (
                 <button
                   key={st}
                   className={task.status === st ? 'active' : ''}
@@ -580,9 +581,8 @@ export default function DetailModal(props: Props) {
                     value={draft.status}
                     onChange={(e) => patchDraft({ status: e.target.value as Status })}
                   >
-                    <option value="todo">待办</option>
-                    <option value="doing">进行中</option>
-                    <option value="done">已完成</option>
+                    <option value="todo">未处理</option>
+                    <option value="done">已处理</option>
                   </select>
                 </div>
                 <div className="ed-field">

@@ -18,17 +18,16 @@ interface Props {
 }
 
 const EXP_STATUS: Record<string, string> = {
-  todo: '待办',
-  doing: '进行中',
-  done: '已完成',
-  unplanned: '未规划',
+  todo: '未处理',
+  done: '已处理',
+  unplanned: '未排期',
 }
 
 export default function ExportModal(props: Props) {
   const initialStatuses = () => {
     if (props.statusFilter === 'unplanned') return new Set(['unplanned'])
-    if (['todo', 'doing', 'done'].includes(props.statusFilter)) return new Set([props.statusFilter])
-    return new Set(['todo', 'doing', 'done', 'unplanned'])
+    if (['todo', 'done'].includes(props.statusFilter)) return new Set([props.statusFilter])
+    return new Set(['todo', 'done', 'unplanned'])
   }
   const [statuses, setStatuses] = useState<Set<string>>(initialStatuses)
   const [format, setFormat] = useState<'json' | 'csv'>('json')
@@ -50,7 +49,7 @@ export default function ExportModal(props: Props) {
     return props.tasks.filter((t) => {
       const project = props.projects.find((p) => p.id === t.projectId)
       if (project?.archived) return false
-      const key = t.status === 'done' ? 'done' : t.status === 'doing' ? 'doing' : 'todo'
+      const key = t.status === 'done' ? 'done' : 'todo'
       const unplanned = !t.planDate && !t.dueDate
       if (!(statuses.has(key) || (unplanned && statuses.has('unplanned')))) return false
       if (props.scope) {

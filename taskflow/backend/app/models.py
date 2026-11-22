@@ -5,7 +5,7 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
-Status = Literal["todo", "doing", "done"]
+Status = Literal["todo", "done"]
 Priority = Literal["", "high", "mid", "low"]
 
 

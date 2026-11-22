@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { MouseEvent as ReactMouseEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { Project, Task } from '../types'
 import { getDragPayload, monthCells, setDragPayload } from '../utils'
 
@@ -7,6 +9,7 @@ interface Props {
   tasks: Task[]
   projects: Project[]
   selDay: string
+  focusId?: string
   onPrev: () => void
   onNext: () => void
   onToday: () => void
@@ -14,12 +17,50 @@ interface Props {
   onAddDay: (iso: string) => void
   onOpen: (id: string) => void
   onSchedule: (taskId: string, iso: string) => void
+  onEdit: (id: string) => void
+  onToggleStatus: (task: Task) => void
+  onDeleteTask: (task: Task) => void
 }
 
 export default function MonthView(props: Props) {
   const [hint, setHint] = useState('')
+  const [menu, setMenu] = useState<{ x: number; y: number; task?: Task; iso?: string } | null>(null)
   const cells = monthCells(props.cursor)
   const shadeOf = (pid: string) => props.projects.find((p) => p.id === pid)?.shade ?? 0
+
+  const openMenu = (event: ReactMouseEvent, payload: { task?: Task; iso?: string }) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setMenu({
+      x: Math.min(event.clientX, window.innerWidth - 180),
+      y: Math.min(event.clientY, window.innerHeight - 168),
+      ...payload,
+    })
+  }
+
+  // 右键菜单：点击空白、滚动或 Esc 关闭
+  useEffect(() => {
+    if (!menu) return
+    const close = () => setMenu(null)
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenu(null)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menu])
+
+  // 新建事项后滚动到它所在的日期卡片
+  useEffect(() => {
+    if (!props.focusId) return
+    const el = document.querySelector<HTMLElement>(`[data-task-id="${props.focusId}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+  }, [props.focusId, props.tasks])
 
   return (
     <div className="cal">
@@ -77,6 +118,10 @@ export default function MonthView(props: Props) {
                 if ((e.target as HTMLElement).closest('.tcard,.day-add')) return
                 props.onSelectDay(cell.iso)
               }}
+              onContextMenu={(e) => {
+                if ((e.target as HTMLElement).closest('.tcard')) return
+                openMenu(e, { iso: cell.iso })
+              }}
             >
               <div className="dnum">{cell.day}</div>
               <button
@@ -94,7 +139,13 @@ export default function MonthView(props: Props) {
                 {planned.map((t) => (
                   <button
                     key={t.id}
-                    className={'tcard g' + shadeOf(t.projectId) + (t.status === 'done' ? ' done' : '')}
+                    data-task-id={t.id}
+                    className={
+                      'tcard g' +
+                      shadeOf(t.projectId) +
+                      (t.status === 'done' ? ' done' : '') +
+                      (props.focusId === t.id ? ' flash' : '')
+                    }
                     draggable
                     onDragStart={() => setDragPayload({ type: 'task', id: t.id })}
                     onDragEnd={() => setDragPayload(null)}
@@ -102,13 +153,22 @@ export default function MonthView(props: Props) {
                       e.stopPropagation()
                       props.onOpen(t.id)
                     }}
+                    onContextMenu={(e) => openMenu(e, { task: t })}
                   >
                     <div className="tcard-top">
                       <span className="time">
                         {t.start}
                         {t.end ? '–' + t.end : ''}
                       </span>
-                      <span className={'cdot ' + t.status} style={{ marginLeft: 'auto' }}>
+                      <span
+                        className={'cdot ' + t.status}
+                        style={{ marginLeft: 'auto' }}
+                        title={t.status === 'done' ? '标记为未处理' : '标记为已处理'}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          props.onToggleStatus(t)
+                        }}
+                      >
                         {t.status === 'done' ? '✓' : ''}
                       </span>
                     </div>
@@ -118,11 +178,13 @@ export default function MonthView(props: Props) {
                 {dueItems.map((t) => (
                   <button
                     key={'due-' + t.id}
-                    className="tcard due"
+                    data-task-id={t.id}
+                    className={'tcard due' + (props.focusId === t.id ? ' flash' : '')}
                     onClick={(e) => {
                       e.stopPropagation()
                       props.onOpen(t.id)
                     }}
+                    onContextMenu={(e) => openMenu(e, { task: t })}
                   >
                     <div className="ctitle">⏰ {t.title}</div>
                   </button>
@@ -132,6 +194,60 @@ export default function MonthView(props: Props) {
           )
         })}
       </div>
+      {menu &&
+        createPortal(
+          <div
+            className="ctx-menu"
+            style={{ left: menu.x, top: menu.y }}
+            onMouseDown={(e) => e.stopPropagation()}
+            onContextMenu={(e) => e.preventDefault()}
+          >
+            {menu.task ? (
+              <>
+                <button
+                  onClick={() => {
+                    const t = menu.task!
+                    setMenu(null)
+                    props.onEdit(t.id)
+                  }}
+                >
+                  ✎ 编辑事项
+                </button>
+                <button
+                  onClick={() => {
+                    const t = menu.task!
+                    setMenu(null)
+                    props.onToggleStatus(t)
+                  }}
+                >
+                  {menu.task.status === 'done' ? '↺ 标记为未处理' : '✓ 标记为已处理'}
+                </button>
+                <button
+                  className="danger"
+                  onClick={() => {
+                    const t = menu.task!
+                    setMenu(null)
+                    props.onDeleteTask(t)
+                  }}
+                >
+                  ✕ 删除事项
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => {
+                  const iso = menu.iso!
+                  setMenu(null)
+                  props.onSelectDay(iso)
+                  props.onAddDay(iso)
+                }}
+              >
+                ＋ 在此日新增
+              </button>
+            )}
+          </div>,
+          document.body,
+        )}
     </div>
   )
 }

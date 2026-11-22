@@ -21,6 +21,7 @@ import type {
   Priority,
   Scope,
   Settings,
+  Status,
   StatusFilter,
   Task,
   TaskDraft,
@@ -94,6 +95,8 @@ export default function App() {
   const [dayDate, setDayDate] = useState(today())
   const [selDay, setSelDay] = useState(today())
   const [detail, setDetail] = useState<DetailState>(null)
+  const [focusId, setFocusId] = useState('')
+  const focusTimer = useRef<number | undefined>(undefined)
   const [moveTaskId, setMoveTaskId] = useState('')
   const [projPrompt, setProjPrompt] = useState(false)
   const [folderPromptProject, setFolderPromptProject] = useState('')
@@ -119,7 +122,10 @@ export default function App() {
   }, [previewTheme, data?.settings.theme])
 
   useEffect(() => {
-    return () => window.clearTimeout(toastTimer.current)
+    return () => {
+      window.clearTimeout(toastTimer.current)
+      window.clearTimeout(focusTimer.current)
+    }
   }, [])
 
   if (loadError) {
@@ -200,6 +206,13 @@ export default function App() {
 
   const openTask = (id: string) => setDetail({ mode: 'view', taskId: id })
 
+  /** 新建成功后高亮并滚动到新事项，避免"保存了却看不见"。 */
+  const focusTask = (task: Task) => {
+    setFocusId(task.id)
+    window.clearTimeout(focusTimer.current)
+    focusTimer.current = window.setTimeout(() => setFocusId(''), 2600)
+  }
+
   const detailTask = detail?.taskId ? tasks.find((t) => t.id === detail.taskId) || null : null
 
   const toggleSel = (type: 'p' | 'f' | 't', id: string) => {
@@ -241,10 +254,36 @@ export default function App() {
   const schedule = async (taskId: string, iso: string) => {
     try {
       await api.scheduleTask(taskId, iso)
-      await reload('已排到 ' + iso)
+      await reload(iso ? '已排到 ' + iso : '已清除排期')
     } catch (err) {
       showToast((err as Error).message)
     }
+  }
+
+  const openEdit = (id: string) => setDetail({ mode: 'edit', taskId: id })
+
+  /** 卡片上一键切换未处理 / 已处理。 */
+  const toggleStatus = async (task: Task) => {
+    const next: Status = task.status === 'done' ? 'todo' : 'done'
+    try {
+      await api.updateTask(task.id, { status: next })
+      await reload(next === 'done' ? '已处理' : '已恢复为未处理')
+    } catch (err) {
+      showToast((err as Error).message)
+    }
+  }
+
+  const askDeleteTask = (task: Task) => {
+    setConfirm({
+      title: `删除事项「${task.title}」？`,
+      message: '事项及其上传的图片、附件都会被删除，无法恢复。',
+      confirmText: '删除事项',
+      danger: true,
+      action: async () => {
+        await api.deleteTask(task.id)
+        await reload('已删除')
+      },
+    })
   }
 
   const runConfirm = async (state: ConfirmState) => {
@@ -471,10 +510,9 @@ export default function App() {
                       {(
                         [
                           ['all', '全部'],
-                          ['todo', '待办'],
-                          ['doing', '进行中'],
-                          ['done', '已完成'],
-                          ['unplanned', '未规划'],
+                          ['todo', '未处理'],
+                          ['done', '已处理'],
+                          ['unplanned', '未排期'],
                         ] as [StatusFilter, string][]
                       ).map(([key, label]) => (
                         <button
@@ -487,7 +525,7 @@ export default function App() {
                       ))}
                       <label className="show-done">
                         <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} />
-                        展示已完成
+                        展示已处理
                       </label>
                     </div>
                     <select
@@ -529,6 +567,10 @@ export default function App() {
                 onOpen={openTask}
                 onToggleSelect={(id) => toggleSel('t', id)}
                 onDropTask={dropTaskOnTask}
+                onSchedule={schedule}
+                onEdit={openEdit}
+                onToggleStatus={toggleStatus}
+                onDeleteTask={askDeleteTask}
               />
             )}
 
@@ -543,8 +585,12 @@ export default function App() {
                 onToday={() => setMonthCursor(new Date())}
                 onSelectDay={setSelDay}
                 onAddDay={addOnDay}
+                focusId={focusId}
                 onOpen={openTask}
                 onSchedule={schedule}
+                onEdit={openEdit}
+                onToggleStatus={toggleStatus}
+                onDeleteTask={askDeleteTask}
               />
             )}
 
@@ -562,10 +608,14 @@ export default function App() {
                 onBack={() => setWeekOffset(0)}
                 onSelectDay={setSelDay}
                 onAddDay={addOnDay}
+                focusId={focusId}
                 onOpen={openTask}
                 onToggleSelect={(id) => toggleSel('t', id)}
                 onSchedule={schedule}
                 onDropTask={dropTaskOnTask}
+                onEdit={openEdit}
+                onToggleStatus={toggleStatus}
+                onDeleteTask={askDeleteTask}
               />
             )}
 
@@ -579,10 +629,14 @@ export default function App() {
                 selected={selected}
                 onDateChange={setDayDate}
                 onAddAt={addOnDayAt}
+                focusId={focusId}
                 onScheduleRange={updateTaskTime}
                 onOpen={openTask}
                 onToggleSelect={(id) => toggleSel('t', id)}
                 onDropTask={dropTaskOnTask}
+                onEdit={openEdit}
+                onToggleStatus={toggleStatus}
+                onDeleteTask={askDeleteTask}
               />
             )}
           </div>
@@ -599,6 +653,7 @@ export default function App() {
           folders={folders}
           onClose={() => setDetail(null)}
           onChanged={reload}
+          onSaved={focusTask}
           onToast={showToast}
           onMove={setMoveTaskId}
           onConfirm={setConfirm}

@@ -1,6 +1,6 @@
 import type { Priority, Status, Task } from './types'
 
-export const STATUS: Record<Status, string> = { todo: '待办', doing: '进行中', done: '已完成' }
+export const STATUS: Record<Status, string> = { todo: '未处理', done: '已处理' }
 export const PRIORITY_LABEL: Record<string, string> = { high: '高', mid: '中', low: '低', '': '无' }
 export const PRIORITY_RANK: Record<string, number> = { high: 0, mid: 1, low: 2, '': 3 }
 

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { Folder, Project, Task } from '../types'
 import { getDragPayload, setDragPayload, weekDays } from '../utils'
 import TaskRow from './TaskRow'
@@ -9,6 +9,7 @@ interface Props {
   projects: Project[]
   folders: Folder[]
   selDay: string
+  focusId?: string
   batchMode: boolean
   selected: Set<string>
   onPrev: () => void
@@ -20,12 +21,22 @@ interface Props {
   onToggleSelect: (id: string) => void
   onSchedule: (taskId: string, iso: string) => void
   onDropTask: (sourceId: string, targetId: string) => void
+  onEdit: (id: string) => void
+  onToggleStatus: (task: Task) => void
+  onDeleteTask: (task: Task) => void
 }
 
 export default function WeekView(props: Props) {
   const [hint, setHint] = useState('')
   const days = weekDays(props.offset)
   const label = props.offset === 0 ? '本周' : props.offset > 0 ? `未来第 ${props.offset} 周` : `过去第 ${-props.offset} 周`
+
+  // 新建事项后滚动到它所在的日期列表
+  useEffect(() => {
+    if (!props.focusId) return
+    const el = document.querySelector<HTMLElement>(`[data-task-id="${props.focusId}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' })
+  }, [props.focusId, props.tasks])
 
   return (
     <div className="weekview">
@@ -78,7 +89,7 @@ export default function WeekView(props: Props) {
               >
                 {day.weekday} {day.label}
                 {day.isToday ? ' · 今天' : ''}
-                {(planned.length || dueItems.length) && (
+                {(planned.length + dueItems.length) > 0 && (
                   <span className="wday-count"> {planned.length + dueItems.length} 项</span>
                 )}
               </span>
@@ -103,9 +114,14 @@ export default function WeekView(props: Props) {
                     folders={props.folders}
                     batchMode={props.batchMode}
                     selected={props.selected.has('t:' + t.id)}
+                    flash={props.focusId === t.id}
                     onOpen={props.onOpen}
                     onToggleSelect={props.onToggleSelect}
                     onDropTask={props.onDropTask}
+                    onSchedule={props.onSchedule}
+                    onEdit={props.onEdit}
+                    onToggleStatus={props.onToggleStatus}
+                    onDeleteTask={props.onDeleteTask}
                   />
                 ))}
                 {dueItems.map((t) => (
@@ -116,9 +132,14 @@ export default function WeekView(props: Props) {
                     folders={props.folders}
                     batchMode={props.batchMode}
                     selected={props.selected.has('t:' + t.id)}
+                    flash={props.focusId === t.id}
                     onOpen={props.onOpen}
                     onToggleSelect={props.onToggleSelect}
                     onDropTask={props.onDropTask}
+                    onSchedule={props.onSchedule}
+                    onEdit={props.onEdit}
+                    onToggleStatus={props.onToggleStatus}
+                    onDeleteTask={props.onDeleteTask}
                   />
                 ))}
               </div>

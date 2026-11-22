@@ -81,6 +81,8 @@ def init_db() -> None:
     conn = connect()
     try:
         conn.executescript(SCHEMA)
+        # 状态由三态（todo/doing/done）收敛为两态（todo/done），历史“进行中”归为未处理
+        conn.execute("UPDATE tasks SET status = 'todo' WHERE status NOT IN ('todo', 'done')")
         _purge_legacy_seed(conn)
         row = conn.execute("SELECT data FROM settings WHERE id = 1").fetchone()
         if row is None:

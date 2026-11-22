@@ -13,6 +13,7 @@ interface Props {
   tasks: Task[]
   projects: Project[]
   folders: Folder[]
+  focusId?: string
   batchMode: boolean
   selected: Set<string>
   onDateChange: (iso: string) => void
@@ -21,13 +22,14 @@ interface Props {
   onOpen: (id: string) => void
   onToggleSelect: (id: string) => void
   onDropTask: (sourceId: string, targetId: string) => void
+  onEdit: (id: string) => void
+  onToggleStatus: (task: Task) => void
+  onDeleteTask: (task: Task) => void
 }
 
-const HOUR_HEIGHT = 58
+const HOUR_HEIGHT = 46
 const SNAP = 15
 const DEFAULT_DURATION = 30
-
-const WEEK = '日一二三四五六'
 
 function toMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number)
@@ -106,9 +108,6 @@ export default function DayView(props: Props) {
   const innerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
 
-  const d = parseDate(props.date)
-  const weekday = WEEK[d.getDay()]
-
   const dayTasks = props.tasks.filter(
     (t) => t.planDate === props.date || (t.dueDate === props.date && t.planDate !== props.date),
   )
@@ -128,6 +127,13 @@ export default function DayView(props: Props) {
   }, [props.date])
 
   useEffect(() => () => cleanupRef.current?.(), [])
+
+  // 新建事项后滚动到它出现的位置
+  useEffect(() => {
+    if (!props.focusId) return
+    const el = document.querySelector<HTMLElement>(`[data-task-id="${props.focusId}"]`)
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
+  }, [props.focusId, props.tasks])
 
   const beginDrag = (event: ReactPointerEvent, item: TimedItem, mode: DragState['mode']) => {
     if (event.button !== 0) return
@@ -232,7 +238,6 @@ export default function DayView(props: Props) {
         <button className="wk-btn" onClick={() => props.onDateChange(shiftDay(props.date, 1))} title="后一天">
           ›
         </button>
-        <span className="day-wk">周{weekday}</span>
         {props.date !== today() && (
           <button className="wk-btn" onClick={() => props.onDateChange(today())}>
             回到今天
@@ -262,7 +267,10 @@ export default function DayView(props: Props) {
               return (
                 <div
                   key={t.id}
-                  className={'tl-chip pri-' + (t.priority || 'none')}
+                  data-task-id={t.id}
+                  className={
+                    'tl-chip pri-' + (t.priority || 'none') + (props.focusId === t.id ? ' flash' : '')
+                  }
                   draggable={!props.batchMode}
                   onDragStart={() => setDragPayload({ type: 'task', id: t.id })}
                   onDragEnd={() => setDragPayload(null)}
@@ -316,15 +324,19 @@ export default function DayView(props: Props) {
               const top = (start / 60) * HOUR_HEIGHT
               const height = Math.max(24, ((end - start) / 60) * HOUR_HEIGHT)
               const width = 100 / item.laneCount
+              const size = height < 36 ? ' compact' : height < 56 ? ' mid' : ''
               const project = props.projects.find((p) => p.id === item.task.projectId)
               return (
                 <div
                   key={item.task.id}
+                  data-task-id={item.task.id}
                   className={
                     'tl-event g' +
                     (project?.shade ?? 0) +
                     (item.task.status === 'done' ? ' done' : '') +
-                    (preview ? ' dragging' : '')
+                    (preview ? ' dragging' : '') +
+                    (props.focusId === item.task.id ? ' flash' : '') +
+                    size
                   }
                   style={{
                     top,
@@ -345,6 +357,38 @@ export default function DayView(props: Props) {
                     {toTime(start)} – {toTime(end)}
                   </div>
                   <div className="tl-event-status">{STATUS[item.task.status]}</div>
+                  <div className="tl-actions" onPointerDown={(e) => e.stopPropagation()}>
+                    <button
+                      className="tact-mini"
+                      title="编辑事项"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        props.onEdit(item.task.id)
+                      }}
+                    >
+                      ✎
+                    </button>
+                    <button
+                      className="tact-mini"
+                      title={item.task.status === 'done' ? '标记为未处理' : '标记为已处理'}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        props.onToggleStatus(item.task)
+                      }}
+                    >
+                      {item.task.status === 'done' ? '↺' : '✓'}
+                    </button>
+                    <button
+                      className="tact-mini danger"
+                      title="删除事项"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        props.onDeleteTask(item.task)
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </div>
                   <div
                     className="tl-handle bottom"
                     onPointerDown={(e) => beginDrag(e, item, 'end')}

@@ -1,4 +1,4 @@
-export type Status = 'todo' | 'doing' | 'done'
+export type Status = 'todo' | 'done'
 export type Priority = '' | 'high' | 'mid' | 'low'
 export type View = 'list' | 'month' | 'week' | 'day'
 export type Theme = 'soft' | 'warm' | 'blue' | 'dark'
@@ -152,4 +152,4 @@ export interface AiContext {
   projectSplit: boolean
 }
 
-export type StatusFilter = 'all' | 'todo' | 'doing' | 'done' | 'unplanned'
+export type StatusFilter = 'all' | 'todo' | 'done' | 'unplanned'

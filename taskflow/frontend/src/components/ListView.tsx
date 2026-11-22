@@ -14,6 +14,10 @@ interface Props {
   onOpen: (id: string) => void
   onToggleSelect: (id: string) => void
   onDropTask: (sourceId: string, targetId: string) => void
+  onSchedule: (taskId: string, iso: string) => void
+  onEdit: (id: string) => void
+  onToggleStatus: (task: Task) => void
+  onDeleteTask: (task: Task) => void
 }
 
 export default function ListView(props: Props) {
@@ -26,8 +30,9 @@ export default function ListView(props: Props) {
       return byDate(a, b)
     })
 
-  const rows = (list: Task[], showPath = false) =>
-    sortTasks(list).map((t) => (
+  const rows = (list: Task[], showPath = false) => (
+    <div className="task-grid">
+      {sortTasks(list).map((t) => (
         <TaskRow
           key={t.id}
           task={t}
@@ -39,8 +44,14 @@ export default function ListView(props: Props) {
           onOpen={props.onOpen}
           onToggleSelect={props.onToggleSelect}
           onDropTask={props.onDropTask}
+          onSchedule={props.onSchedule}
+          onEdit={props.onEdit}
+          onToggleStatus={props.onToggleStatus}
+          onDeleteTask={props.onDeleteTask}
         />
-      ))
+      ))}
+    </div>
+  )
 
   if (!props.tasks.length) {
     return (
