@@ -1,9 +1,6 @@
 import { useRef, useState } from 'react'
-import type { ChangeEvent, KeyboardEvent as ReactKeyboardEvent } from 'react'
-import type { Attachment, Folder, Project, Status, Task, TaskDraft, TaskInput } from '../types'
-import { PRIORITY_LABEL, STATUS, isOverdue } from '../utils'
+import type { Attachment, Folder, Project, Task, TaskDraft, TaskInput } from '../types'
 import { api } from '../api'
-import type { AskConfirm } from './ConfirmDialog'
 import DateField from './DateField'
 import Lightbox from './Lightbox'
 import Modal from './Modal'
@@ -11,7 +8,6 @@ import Select from './Select'
 
 interface Props {
   task: Task | null
-  mode: 'view' | 'edit'
   draft?: TaskDraft
   projects: Project[]
   folders: Folder[]
@@ -19,11 +15,7 @@ interface Props {
   onChanged: (message?: string) => void
   onSaved?: (task: Task) => void
   onToast: (message: string) => void
-  onMove: (taskId: string) => void
-  onConfirm: AskConfirm
 }
-
-type ViewField = 'title' | 'desc' | 'planDate' | 'dueDate' | 'start' | 'end'
 
 const emptyDraft = (task: Task | null, projects: Project[]): TaskDraft => ({
   id: task?.id,
@@ -51,10 +43,7 @@ function formatSize(size: number): string {
 }
 
 export default function DetailModal(props: Props) {
-  const [mode, setMode] = useState<'view' | 'edit'>(props.mode)
   const [draft, setDraft] = useState<TaskDraft>(() => props.draft || emptyDraft(props.task, props.projects))
-  const [editing, setEditing] = useState<{ field: ViewField; value: string } | null>(null)
-  const [mediaOpen, setMediaOpen] = useState(() => !!(draft.images.length || draft.attachments.length))
   const [remarkOpen, setRemarkOpen] = useState(() => !!draft.remark)
   const [saving, setSaving] = useState(false)
   const [uploading, setUploading] = useState<'' | 'image' | 'file'>('')
@@ -63,61 +52,12 @@ export default function DetailModal(props: Props) {
   const imgRef = useRef<HTMLInputElement>(null)
   const attRef = useRef<HTMLInputElement>(null)
 
-  const task = props.task
-  const project = props.projects.find((p) => p.id === (task?.projectId ?? draft.projectId))
-  const folder = props.folders.find((f) => f.id === (task?.folderId ?? draft.folderId))
-  const overdue = task ? isOverdue(task) : false
+  const project = props.projects.find((p) => p.id === draft.projectId)
+  const folder = props.folders.find((f) => f.id === draft.folderId)
 
   const patchDraft = (patch: Partial<TaskDraft>) => setDraft((prev) => ({ ...prev, ...patch }))
 
   const close = () => props.onClose()
-
-  const commitInline = async (field: ViewField, value: string) => {
-    setEditing(null)
-    if (!task) return
-    const current = field === 'desc' ? task.desc : field === 'title' ? task.title : task[field]
-    if (value === current) return
-    try {
-      await api.updateTask(task.id, { [field]: value } as Partial<TaskInput>)
-      props.onChanged(field === 'title' ? '已保存标题' : '已保存')
-    } catch (err) {
-      props.onToast((err as Error).message)
-    }
-  }
-
-  const changeStatus = async (status: Status) => {
-    if (!task || task.status === status) return
-    try {
-      await api.updateTask(task.id, { status })
-      props.onChanged('已标记为' + STATUS[status])
-    } catch (err) {
-      props.onToast((err as Error).message)
-    }
-  }
-
-  const removeTask = () => {
-    if (!task) return
-    props.onConfirm({
-      title: `删除事项「${task.title}」？`,
-      message: '事项及其上传的图片、附件都会被删除，无法恢复。',
-      confirmText: '删除事项',
-      danger: true,
-      action: async () => {
-        await api.deleteTask(task.id)
-        props.onChanged('已删除')
-        close()
-      },
-    })
-  }
-
-  const startEdit = () => {
-    if (!task) return
-    setDraft(emptyDraft(task, props.projects))
-    setErrors({})
-    setMediaOpen(!!(task.images.length || task.attachments.length))
-    setRemarkOpen(!!task.remark)
-    setMode('edit')
-  }
 
   const validate = (): boolean => {
     const next: { title?: string; time?: string } = {}
@@ -219,398 +159,218 @@ export default function DetailModal(props: Props) {
     }
   }
 
-  const inlineInput = (field: ViewField, type: 'text' | 'date' | 'time' | 'textarea') => {
-    if (!editing) return null
-    const className =
-      'inline-input' + (field === 'desc' ? ' desc-edit' : field === 'title' ? ' title-edit' : '')
-    const handleKey = (e: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      if (e.key === 'Enter' && field !== 'desc') {
-        e.preventDefault()
-        commitInline(field, editing.value)
-      }
-      if (e.key === 'Escape') setEditing(null)
-    }
-    if (type === 'textarea') {
-      return (
-        <textarea
-          className={className}
-          value={editing.value}
-          autoFocus
-          onChange={(e: ChangeEvent<HTMLTextAreaElement>) => setEditing({ field, value: e.target.value })}
-          onBlur={() => commitInline(field, editing.value)}
-          onKeyDown={handleKey}
-        />
-      )
-    }
-    return (
-      <input
-        type={type}
-        className={className}
-        value={editing.value}
-        autoFocus
-        onChange={(e: ChangeEvent<HTMLInputElement>) => setEditing({ field, value: e.target.value })}
-        onBlur={() => commitInline(field, editing.value)}
-        onKeyDown={handleKey}
-      />
-    )
-  }
-
   const foldersOfDraftProject = props.folders.filter((f) => f.projectId === draft.projectId)
 
   return (
     <>
       <Modal size="md" onClose={close}>
-        {mode === 'view' && task ? (
-          <>
-            <div className="d-head">
-              <h3>事项详情</h3>
-              <button className="d-close" onClick={close}>
-                ×
-              </button>
-            </div>
-            {editing?.field === 'title' ? (
-              inlineInput('title', 'text')
-            ) : (
-              <div
-                className="d-title-view"
-                title="点击编辑标题"
-                onClick={() => setEditing({ field: 'title', value: task.title })}
-              >
-                {task.title}
-              </div>
-            )}
-            <div className="status-seg">
-              {(['todo', 'done'] as Status[]).map((st) => (
-                <button
-                  key={st}
-                  className={task.status === st ? 'active' : ''}
-                  onClick={() => changeStatus(st)}
-                >
-                  {STATUS[st]}
-                </button>
-              ))}
-            </div>
-            <div className="d-badges">
-              {task.priority && <span className="badge">优先级·{PRIORITY_LABEL[task.priority]}</span>}
-              {overdue && <span className="badge b-ink">已逾期</span>}
-              {task.needReview && <span className="badge b-ink">待复盘</span>}
-            </div>
-            <div className="sec-label">描述</div>
-            {editing?.field === 'desc' ? (
-              inlineInput('desc', 'textarea')
-            ) : task.desc ? (
-              <div
-                className="desc-view"
-                title="点击编辑描述"
-                onClick={() => setEditing({ field: 'desc', value: task.desc })}
-              >
-                {task.desc}
-              </div>
-            ) : (
-              <div className="desc-empty" onClick={() => setEditing({ field: 'desc', value: '' })}>
-                暂无描述，点击补充
-              </div>
-            )}
-            {task.images.length > 0 && (
-              <>
-                <div className="img-grid">
-                  {task.images.map((img, i) => (
-                    <img
-                      key={i}
-                      className="thumb"
-                      src={img}
-                      alt={`图片 ${i + 1}`}
-                      title="点击查看大图"
-                      onClick={() => setLightbox(i)}
-                    />
-                  ))}
-                </div>
-                <div className="img-hint">点击图片查看大图，支持左右切换</div>
-              </>
-            )}
-            {task.attachments.map((att, i) =>
-              att.url ? (
-                <a
-                  className="att att-link"
-                  key={i}
-                  href={att.url}
-                  download={att.name}
-                  title={'下载 ' + att.name}
-                >
-                  <span>📎</span>
-                  <span className="an">{att.name}</span>
-                  <span className="asz">{formatSize(att.size)}</span>
-                  <span className="adl">下载</span>
-                </a>
-              ) : (
-                <div className="att" key={i} title="旧版本只保存了文件名，原文件未保存">
-                  <span>📎</span>
-                  <span className="an">{att.name}</span>
-                  <span className="asz">文件未存储</span>
-                </div>
-              ),
-            )}
-            <div className="sec-label">排期与归属</div>
-            <div className="d-badges">
-              <span
-                className={'badge editable' + (task.planDate ? '' : ' muted')}
-                onClick={() => setEditing({ field: 'planDate', value: task.planDate })}
-              >
-                {task.planDate ? '计划 ' + task.planDate : '计划日期'}
-              </span>
-              <span
-                className={'badge editable' + (task.dueDate ? '' : ' muted')}
-                onClick={() => setEditing({ field: 'dueDate', value: task.dueDate })}
-              >
-                {task.dueDate ? '截止 ' + task.dueDate + (overdue ? ' ⚠ 逾期' : '') : '截止日期'}
-              </span>
-              <span
-                className={'badge editable' + (task.start ? '' : ' muted')}
-                onClick={() => setEditing({ field: 'start', value: task.start })}
-              >
-                {task.start ? '开始 ' + task.start : '开始时间'}
-              </span>
-              <span
-                className={'badge editable' + (task.end ? '' : ' muted')}
-                onClick={() => setEditing({ field: 'end', value: task.end })}
-              >
-                {task.end ? '结束 ' + task.end : '结束时间'}
-              </span>
-              <span className="badge editable" onClick={() => props.onMove(task.id)}>
-                {project?.name || '未归类'}
-                {folder ? ' · ' + folder.name : ''}
-              </span>
-            </div>
-            {editing && (editing.field === 'planDate' || editing.field === 'dueDate') && (
-              <div style={{ marginTop: 8 }}>
-                <DateField
-                  value={editing.value}
-                  clearable
-                  onChange={(value) => {
-                    const field = editing.field
-                    setEditing(null)
-                    commitInline(field, value)
-                  }}
-                />
-              </div>
-            )}
-            {editing && (editing.field === 'start' || editing.field === 'end') && (
-              <div style={{ marginTop: 8 }}>{inlineInput(editing.field, 'time')}</div>
-            )}
-            {task.remark && <div className="remark-box">{task.remark}</div>}
-            <div className="meta-time">
-              创建于 {task.createdAt || '—'}
-              {task.completedAt ? ` · 完成于 ${task.completedAt}` : ''}
-            </div>
-            <div className="d-foot">
-              <span style={{ flex: 1 }} />
-              <button className="btn btn-danger" onClick={removeTask}>
-                删除
-              </button>
-              <button className="btn btn-pri" onClick={startEdit}>
-                编辑
-              </button>
-            </div>
-          </>
-        ) : (
-          <>
-            <div className="d-head">
-              <h3>{draft.id ? '编辑事项' : '新建事项'}</h3>
-              <button className="d-close" onClick={close}>
-                ×
-              </button>
-            </div>
-            {!draft.id && (
-              <div className="place-hint">
-                将存入：{project?.name || '未归类'}
-                {folder ? ' · ' + folder.name : ''}（保存后可在详情移动）
-              </div>
-            )}
-            <div className="ed-field">
-              <label>
-                事项标题 <span className="req">*</span>
-              </label>
-              <input
-                autoFocus
-                className={errors.title ? 'invalid' : ''}
-                value={draft.title}
-                placeholder="给事项起个标题"
-                onChange={(e) => {
-                  patchDraft({ title: e.target.value })
-                  if (errors.title) setErrors((prev) => ({ ...prev, title: undefined }))
-                }}
-              />
-              {errors.title && <div className="field-error">{errors.title}</div>}
-            </div>
-            <div className="ed-grid">
-              <div className="ed-field">
-                <label>项目</label>
-                <Select
-                  value={draft.projectId}
-                  placeholder="未归类"
-                  options={[
-                    { value: '', label: '未归类' },
-                    ...props.projects.filter((p) => !p.archived).map((p) => ({ value: p.id, label: p.name })),
-                  ]}
-                  onChange={(value) => patchDraft({ projectId: value, folderId: '' })}
-                />
-              </div>
-              <div className="ed-field">
-                <label>分组</label>
-                <Select
-                  value={draft.folderId}
-                  placeholder="未分组"
-                  disabled={!draft.projectId}
-                  options={[
-                    { value: '', label: '未分组' },
-                    ...foldersOfDraftProject.map((f) => ({ value: f.id, label: f.name })),
-                  ]}
-                  onChange={(value) => patchDraft({ folderId: value })}
-                />
-              </div>
-            </div>
-            <div className="ed-field">
-              <label>安排日期与时间（时间填写后会进入日程时间轴）</label>
-              <DateField
-                value={draft.planDate}
-                start={draft.start}
-                end={draft.end}
-                clearable
-                placeholder="选择日期与时间"
-                onChange={(value) => {
-                  patchDraft({ planDate: value })
-                  if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
-                }}
-                onStartChange={(value) => {
-                  patchDraft({ start: value })
-                  if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
-                }}
-                onEndChange={(value) => {
-                  patchDraft({ end: value })
-                  if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
-                }}
-              />
-            </div>
-            {errors.time && <div className="field-error schedule-error">{errors.time}</div>}
-            <div className="ed-field">
-              <label>事项描述（文字，可不填）</label>
-              <textarea
-                value={draft.desc}
-                placeholder="写清楚要做什么、背景、链接……"
-                onChange={(e) => patchDraft({ desc: e.target.value })}
-              />
-            </div>
-            <div className="editor-tools">
-              <button
-                type="button"
-                className={'editor-tool' + (mediaOpen ? ' active' : '')}
-                title="图片 / 附件"
-                aria-label="图片 / 附件"
-                aria-expanded={mediaOpen}
-                onClick={() => setMediaOpen((v) => !v)}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                className={'editor-tool' + (remarkOpen ? ' active' : '')}
-                title="备注"
-                aria-label="备注"
-                aria-expanded={remarkOpen}
-                onClick={() => setRemarkOpen((v) => !v)}
-              >
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-                  <path d="M14 2v6h6M8 13h8M8 17h5" />
-                </svg>
-              </button>
-            </div>
-            {mediaOpen && (
-              <div>
-                <div className="attach-row">
-                  <button className="add-chip" onClick={() => imgRef.current?.click()} disabled={!!uploading}>
-                    {uploading === 'image' ? '图片上传中…' : '＋ 添加图片'}
-                  </button>
-                  <button className="add-chip" onClick={() => attRef.current?.click()} disabled={!!uploading}>
-                    {uploading === 'file' ? '附件上传中…' : '＋ 添加附件'}
-                  </button>
-                  <input
-                    ref={imgRef}
-                    type="file"
-                    accept="image/*"
-                    multiple
-                    hidden
-                    onChange={(e) => {
-                      onImages(e.target.files)
-                      e.target.value = ''
-                    }}
-                  />
-                  <input
-                    ref={attRef}
-                    type="file"
-                    hidden
-                    onChange={(e) => {
-                      onAttachments(e.target.files)
-                      e.target.value = ''
-                    }}
-                  />
-                </div>
-                <div className="img-grid">
-                  {draft.images.map((img, i) => (
-                    <div key={i} className="thumb-wrap">
-                      <img className="thumb" src={img} alt="待保存图片" onClick={() => setLightbox(i)} />
-                      <button
-                        className="mini-x img-x"
-                        title="移除图片"
-                        onClick={() => patchDraft({ images: draft.images.filter((_, idx) => idx !== i) })}
-                      >
-                        ×
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                {draft.attachments.map((att, i) => (
-                  <div className="att" key={i}>
-                    <span>📎</span>
-                    <span className="an">{att.name}</span>
-                    <span className="asz">{formatSize(att.size)}</span>
-                    <button
-                      className="mini-x"
-                      title="移除附件"
-                      onClick={() => patchDraft({ attachments: draft.attachments.filter((_, idx) => idx !== i) })}
-                    >
-                      ×
-                    </button>
-                  </div>
-                ))}
-                <div className="img-hint">图片和附件会保存到本地数据目录，删除事项时一并清理。</div>
-              </div>
-            )}
-            {remarkOpen && (
-              <div className="ed-field remark-editor">
-                <textarea
-                  value={draft.remark}
-                  placeholder="备注：补充说明，仅自己可见"
-                  onChange={(e) => patchDraft({ remark: e.target.value })}
-                />
-              </div>
-            )}
-            <div className="d-foot">
-              <button className="btn btn-ghost" onClick={close}>
-                取消
-              </button>
-              <button className="btn btn-pri" onClick={save} disabled={saving || !!uploading}>
-                {saving ? '保存中…' : uploading ? '上传中…' : '保存'}
-              </button>
-            </div>
-          </>
+        <div className="d-head">
+          <h3>{draft.id ? '编辑事项' : '新建事项'}</h3>
+          <button className="d-close" onClick={close}>
+            ×
+          </button>
+        </div>
+        {!draft.id && (
+          <div className="place-hint">
+            将存入：{project?.name || '未归类'}
+            {folder ? ' · ' + folder.name : ''}（保存后可在详情移动）
+          </div>
         )}
+        <div className="ed-field">
+          <label>
+            事项标题 <span className="req">*</span>
+          </label>
+          <input
+            autoFocus
+            className={errors.title ? 'invalid' : ''}
+            value={draft.title}
+            placeholder="给事项起个标题"
+            onChange={(e) => {
+              patchDraft({ title: e.target.value })
+              if (errors.title) setErrors((prev) => ({ ...prev, title: undefined }))
+            }}
+          />
+          {errors.title && <div className="field-error">{errors.title}</div>}
+        </div>
+        <div className="ed-grid">
+          <div className="ed-field">
+            <label>项目</label>
+            <Select
+              value={draft.projectId}
+              placeholder="未归类"
+              options={[
+                { value: '', label: '未归类' },
+                ...props.projects.filter((p) => !p.archived).map((p) => ({ value: p.id, label: p.name })),
+              ]}
+              onChange={(value) => patchDraft({ projectId: value, folderId: '' })}
+            />
+          </div>
+          <div className="ed-field">
+            <label>分组</label>
+            <Select
+              value={draft.folderId}
+              placeholder="未分组"
+              disabled={!draft.projectId}
+              options={[
+                { value: '', label: '未分组' },
+                ...foldersOfDraftProject.map((f) => ({ value: f.id, label: f.name })),
+              ]}
+              onChange={(value) => patchDraft({ folderId: value })}
+            />
+          </div>
+        </div>
+        <div className="ed-field">
+          <label>安排日期与时间（时间填写后会进入日程时间轴）</label>
+          <DateField
+            value={draft.planDate}
+            start={draft.start}
+            end={draft.end}
+            clearable
+            placeholder="选择日期与时间"
+            onChange={(value) => {
+              patchDraft({ planDate: value })
+              if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
+            }}
+            onStartChange={(value) => {
+              patchDraft({ start: value })
+              if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
+            }}
+            onEndChange={(value) => {
+              patchDraft({ end: value })
+              if (errors.time) setErrors((prev) => ({ ...prev, time: undefined }))
+            }}
+          />
+        </div>
+        {errors.time && <div className="field-error schedule-error">{errors.time}</div>}
+        <div className="ed-field">
+          <label>事项描述（文字，可不填）</label>
+          <textarea
+            value={draft.desc}
+            placeholder="写清楚要做什么、背景、链接……"
+            onChange={(e) => patchDraft({ desc: e.target.value })}
+          />
+        </div>
+        <div className="editor-tools">
+          <button
+            type="button"
+            className="editor-tool"
+            title="添加图片"
+            aria-label="添加图片"
+            disabled={!!uploading}
+            onClick={() => imgRef.current?.click()}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <circle cx="8.5" cy="9.5" r="1.6" />
+              <path d="m21 15-4.6-4.6L7 20" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="editor-tool"
+            title="添加附件"
+            aria-label="添加附件"
+            disabled={!!uploading}
+            onClick={() => attRef.current?.click()}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className={'editor-tool' + (remarkOpen ? ' active' : '')}
+            title="备注"
+            aria-label="备注"
+            aria-expanded={remarkOpen}
+            onClick={() => setRemarkOpen((v) => !v)}
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+              <path d="M14 2v6h6M8 13h8M8 17h5" />
+            </svg>
+          </button>
+          <input
+            ref={imgRef}
+            type="file"
+            accept="image/*"
+            multiple
+            hidden
+            onChange={(e) => {
+              onImages(e.target.files)
+              e.target.value = ''
+            }}
+          />
+          <input
+            ref={attRef}
+            type="file"
+            hidden
+            onChange={(e) => {
+              onAttachments(e.target.files)
+              e.target.value = ''
+            }}
+          />
+        </div>
+        {uploading && (
+          <div className="img-hint">{uploading === 'image' ? '图片上传中…' : '附件上传中…'}</div>
+        )}
+        {draft.images.length > 0 && (
+          <div className="img-grid">
+            {draft.images.map((img, i) => (
+              <div key={i} className="thumb-wrap">
+                <img className="thumb" src={img} alt="待保存图片" onClick={() => setLightbox(i)} />
+                <button
+                  className="mini-x img-x"
+                  title="移除图片"
+                  onClick={() => patchDraft({ images: draft.images.filter((_, idx) => idx !== i) })}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        {draft.attachments.map((att, i) => (
+          <div className="att" key={i}>
+            <span>📎</span>
+            {att.url ? (
+              <a className="an" href={att.url} download={att.name} title={'下载 ' + att.name}>
+                {att.name}
+              </a>
+            ) : (
+              <span className="an">{att.name}</span>
+            )}
+            <span className="asz">{formatSize(att.size)}</span>
+            <button
+              className="mini-x"
+              title="移除附件"
+              onClick={() => patchDraft({ attachments: draft.attachments.filter((_, idx) => idx !== i) })}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        {remarkOpen && (
+          <div className="ed-field remark-editor">
+            <textarea
+              value={draft.remark}
+              placeholder="备注：补充说明，仅自己可见"
+              onChange={(e) => patchDraft({ remark: e.target.value })}
+            />
+          </div>
+        )}
+        <div className="d-foot">
+          <button className="btn btn-ghost" onClick={close}>
+            取消
+          </button>
+          <button className="btn btn-pri" onClick={save} disabled={saving || !!uploading}>
+            {saving ? '保存中…' : uploading ? '上传中…' : '保存'}
+          </button>
+        </div>
       </Modal>
       {lightbox !== null && (
         <Lightbox
-          images={mode === 'view' && task ? task.images : draft.images}
+          images={draft.images}
           index={lightbox}
           onIndexChange={setLightbox}
           onClose={() => setLightbox(null)}

@@ -9,7 +9,6 @@ import ExportModal from './components/ExportModal'
 import FilterBar from './components/FilterBar'
 import ListView from './components/ListView'
 import MonthView from './components/MonthView'
-import MoveModal from './components/MoveModal'
 import PromptModal from './components/PromptModal'
 import SettingsModal from './components/SettingsModal'
 import Sidebar from './components/Sidebar'
@@ -31,7 +30,7 @@ import type {
 import type { DragPayload } from './utils'
 import { isOverdue, today } from './utils'
 
-type DetailState = { mode: 'view' | 'edit'; taskId?: string; draft?: TaskDraft } | null
+type DetailState = { taskId?: string; draft?: TaskDraft } | null
 
 type ConfirmState = AskConfirmOptions | null
 
@@ -98,7 +97,6 @@ export default function App() {
   const [detail, setDetail] = useState<DetailState>(null)
   const [focusId, setFocusId] = useState('')
   const focusTimer = useRef<number | undefined>(undefined)
-  const [moveTaskId, setMoveTaskId] = useState('')
   const [projPrompt, setProjPrompt] = useState(false)
   const [folderPromptProject, setFolderPromptProject] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
@@ -209,10 +207,10 @@ export default function App() {
   }
 
   const openNew = (opts: { projectId?: string; folderId?: string; planDate?: string; start?: string; end?: string } = {}) => {
-    setDetail({ mode: 'edit', draft: newDraft(projects, opts) })
+    setDetail({ draft: newDraft(projects, opts) })
   }
 
-  const openTask = (id: string) => setDetail({ mode: 'view', taskId: id })
+  const openTask = (id: string) => setDetail({ taskId: id })
 
   /** 新建成功后高亮并滚动到新事项，避免"保存了却看不见"。 */
   const focusTask = (task: Task) => {
@@ -222,7 +220,6 @@ export default function App() {
   }
 
   const detailTask = detail?.taskId ? tasks.find((t) => t.id === detail.taskId) || null : null
-
   const toggleSel = (type: 'p' | 'f' | 't', id: string) => {
     setSelected((prev) => {
       const key = `${type}:${id}`
@@ -271,8 +268,6 @@ export default function App() {
       showToast((err as Error).message)
     }
   }
-
-  const openEdit = (id: string) => setDetail({ mode: 'edit', taskId: id })
 
   /** 卡片上一键切换未处理 / 已处理。 */
   const toggleStatus = async (task: Task) => {
@@ -558,7 +553,6 @@ export default function App() {
                 onToggleSelect={(id) => toggleSel('t', id)}
                 onDropTask={dropTaskOnTask}
                 onSchedule={schedule}
-                onEdit={openEdit}
                 onToggleStatus={toggleStatus}
                 onDeleteTask={askDeleteTask}
                 onToggleReview={toggleReview}
@@ -580,7 +574,7 @@ export default function App() {
                 focusId={focusId}
                 onOpen={openTask}
                 onSchedule={schedule}
-                onEdit={openEdit}
+                onEdit={openTask}
                 onToggleStatus={toggleStatus}
                 onDeleteTask={askDeleteTask}
               />
@@ -631,30 +625,16 @@ export default function App() {
         </main>
       </div>
 
-      {detail && (detail.mode === 'view' ? detailTask : true) && (
+      {detail && (detail.taskId ? detailTask : true) && (
         <DetailModal
           key={detail.taskId || 'new'}
           task={detailTask}
-          mode={detail.mode}
           draft={detail.draft}
           projects={projects}
           folders={folders}
           onClose={() => setDetail(null)}
           onChanged={reload}
           onSaved={focusTask}
-          onToast={showToast}
-          onMove={setMoveTaskId}
-          onConfirm={setConfirm}
-        />
-      )}
-
-      {moveTaskId && (
-        <MoveModal
-          taskId={moveTaskId}
-          projects={projects}
-          folders={folders}
-          onClose={() => setMoveTaskId('')}
-          onMoved={reload}
           onToast={showToast}
         />
       )}

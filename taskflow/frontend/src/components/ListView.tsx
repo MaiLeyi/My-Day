@@ -14,7 +14,6 @@ interface Props {
   onToggleSelect: (id: string) => void
   onDropTask: (sourceId: string, targetId: string) => void
   onSchedule: (taskId: string, iso: string, start?: string, end?: string) => void
-  onEdit: (id: string) => void
   onToggleStatus: (task: Task) => void
   onDeleteTask: (task: Task) => void
   onToggleReview: (task: Task) => void
@@ -56,7 +55,6 @@ export default function ListView(props: Props) {
           onToggleSelect={props.onToggleSelect}
           onDropTask={props.onDropTask}
           onSchedule={props.onSchedule}
-          onEdit={props.onEdit}
           onToggleStatus={props.onToggleStatus}
           onDeleteTask={props.onDeleteTask}
           onToggleReview={props.onToggleReview}
