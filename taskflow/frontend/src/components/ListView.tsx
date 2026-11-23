@@ -13,7 +13,7 @@ interface Props {
   onOpen: (id: string) => void
   onToggleSelect: (id: string) => void
   onDropTask: (sourceId: string, targetId: string) => void
-  onSchedule: (taskId: string, iso: string) => void
+  onSchedule: (taskId: string, iso: string, start?: string, end?: string) => void
   onEdit: (id: string) => void
   onToggleStatus: (task: Task) => void
   onDeleteTask: (task: Task) => void

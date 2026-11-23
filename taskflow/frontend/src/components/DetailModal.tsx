@@ -7,6 +7,7 @@ import type { AskConfirm } from './ConfirmDialog'
 import DateField from './DateField'
 import Lightbox from './Lightbox'
 import Modal from './Modal'
+import Select from './Select'
 
 interface Props {
   task: Task | null
@@ -444,35 +445,28 @@ export default function DetailModal(props: Props) {
             <div className="ed-grid">
               <div className="ed-field">
                 <label>项目</label>
-                <select
+                <Select
                   value={draft.projectId}
-                  onChange={(e) => patchDraft({ projectId: e.target.value, folderId: '' })}
-                >
-                  {props.projects
-                    .filter((p) => !p.archived)
-                    .map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  {draft.projectId === '' && <option value="">未归类</option>}
-                </select>
+                  placeholder="未归类"
+                  options={[
+                    { value: '', label: '未归类' },
+                    ...props.projects.filter((p) => !p.archived).map((p) => ({ value: p.id, label: p.name })),
+                  ]}
+                  onChange={(value) => patchDraft({ projectId: value, folderId: '' })}
+                />
               </div>
               <div className="ed-field">
                 <label>分组</label>
-                <select
+                <Select
                   value={draft.folderId}
+                  placeholder="未分组"
                   disabled={!draft.projectId}
-                  title={!draft.projectId ? '请先选择项目' : undefined}
-                  onChange={(e) => patchDraft({ folderId: e.target.value })}
-                >
-                  <option value="">未分组</option>
-                  {foldersOfDraftProject.map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.name}
-                    </option>
-                  ))}
-                </select>
+                  options={[
+                    { value: '', label: '未分组' },
+                    ...foldersOfDraftProject.map((f) => ({ value: f.id, label: f.name })),
+                  ]}
+                  onChange={(value) => patchDraft({ folderId: value })}
+                />
               </div>
             </div>
             <div className="ed-field">

@@ -1,14 +1,8 @@
 import { useState } from 'react'
 import type { DragEvent as ReactDragEvent } from 'react'
 import type { Folder, Project, Task } from '../types'
-import {
-  PRIORITY_LABEL,
-  fmt,
-  getDragPayload,
-  parseDate,
-  setDragPayload,
-  today,
-} from '../utils'
+import { PRIORITY_LABEL, getDragPayload, setDragPayload, today } from '../utils'
+import DateField from './DateField'
 
 interface Props {
   task: Task
@@ -25,19 +19,35 @@ interface Props {
   onEdit: (id: string) => void
   onToggleStatus: (task: Task) => void
   onDeleteTask: (task: Task) => void
-  onSchedule?: (id: string, iso: string) => void
+  onSchedule?: (id: string, iso: string, start?: string, end?: string) => void
   onToggleReview?: (task: Task) => void
 }
 
-function shiftDay(iso: string, delta: number): string {
-  const d = iso ? parseDate(iso) : new Date()
-  d.setDate(d.getDate() + delta)
-  return fmt(d)
+const DURATION = 30
+
+const toMinutes = (t: string): number => {
+  const [h, m] = t.split(':').map(Number)
+  return (h || 0) * 60 + (m || 0)
+}
+
+const toTime = (mins: number): string => {
+  const m = Math.max(0, Math.min(24 * 60 - 1, Math.round(mins)))
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+}
+
+/** 保证存入的时间成对且合法，避免出现只有开始/结束、或结束早于开始的脏数据。 */
+function normalizeTime(planDate: string, start: string, end: string) {
+  if (!planDate) return { planDate: '', start: '', end: '' }
+  let s = start
+  let e = end
+  if (s && !e) e = toTime(toMinutes(s) + DURATION)
+  else if (!s && e) s = toTime(toMinutes(e) - DURATION)
+  if (s && e && s >= e) e = toTime(toMinutes(s) + DURATION)
+  return { planDate, start: s, end: e }
 }
 
 export default function TaskRow(props: Props) {
   const [dragOver, setDragOver] = useState(false)
-  const [schedOpen, setSchedOpen] = useState(false)
   const { task } = props
 
   const drop = (event: ReactDragEvent) => {
@@ -50,9 +60,9 @@ export default function TaskRow(props: Props) {
     }
   }
 
-  const pickDate = (iso: string) => {
-    setSchedOpen(false)
-    props.onSchedule?.(task.id, iso)
+  const commitSchedule = (planDate: string, start: string, end: string) => {
+    const next = normalizeTime(planDate, start, end)
+    props.onSchedule?.(task.id, next.planDate, next.start, next.end)
   }
 
   return (
@@ -77,7 +87,7 @@ export default function TaskRow(props: Props) {
       onDragLeave={() => setDragOver(false)}
       onDrop={drop}
       onClick={(e) => {
-        if ((e.target as HTMLElement).closest('.chk,.sbox,.tact,.quick-sched')) return
+        if ((e.target as HTMLElement).closest('.chk,.sbox,.tact,.datefield')) return
         props.onOpen(task.id)
       }}
     >
@@ -110,46 +120,30 @@ export default function TaskRow(props: Props) {
       <div className="tright">
         {!props.batchMode && (
           <div className="trow-actions">
-          <button
-            className={'tact review-btn' + (task.needReview ? ' active' : '')}
-            title={task.needReview ? '取消待复盘' : '标记待复盘'}
-            onClick={(e) => {
-              e.stopPropagation()
-              props.onToggleReview?.(task)
-            }}
-          >
-            ⚑
-          </button>
-          <button
-            className="tact"
-            title="编辑事项"
-            onClick={(e) => {
-              e.stopPropagation()
-              props.onEdit(task.id)
-            }}
-          >
-            ✎
-          </button>
-          <button
-            className="tact"
-            title="排到某天"
-            onClick={(e) => {
-              e.stopPropagation()
-              setSchedOpen((v) => !v)
-            }}
-          >
-            ⏱
-          </button>
-          <button
-            className="tact danger"
-            title="删除事项"
-            onClick={(e) => {
-              e.stopPropagation()
-              props.onDeleteTask(task)
-            }}
-          >
-            ✕
-          </button>
+            <DateField
+              compact
+              iconOnly
+              icon="⏱"
+              clearable
+              align="right"
+              title="排到某天 / 安排时间"
+              value={task.planDate}
+              start={task.start}
+              end={task.end}
+              onChange={(iso) => commitSchedule(iso, task.start, task.end)}
+              onStartChange={(start) => commitSchedule(task.planDate || today(), start, task.end)}
+              onEndChange={(end) => commitSchedule(task.planDate || today(), task.start, end)}
+            />
+            <button
+              className="tact danger"
+              title="删除事项"
+              onClick={(e) => {
+                e.stopPropagation()
+                props.onDeleteTask(task)
+              }}
+            >
+              ✕
+            </button>
           </div>
         )}
         {props.batchMode && (
@@ -162,26 +156,6 @@ export default function TaskRow(props: Props) {
           />
         )}
       </div>
-      {schedOpen && (
-        <div className="quick-sched" onClick={(e) => e.stopPropagation()}>
-          <button onClick={() => pickDate(today())}>今天</button>
-          <button onClick={() => pickDate(shiftDay(today(), 1))}>明天</button>
-          <button onClick={() => pickDate(shiftDay(today(), 7))}>下周今天</button>
-          <label>
-            选择日期
-            <input
-              type="date"
-              value={task.planDate}
-              onChange={(e) => e.target.value && pickDate(e.target.value)}
-            />
-          </label>
-          {task.planDate && (
-            <button className="danger" onClick={() => pickDate('')}>
-              清除排期
-            </button>
-          )}
-        </div>
-      )}
     </div>
   )
 }

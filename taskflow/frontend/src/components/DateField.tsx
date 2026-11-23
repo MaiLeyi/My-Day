@@ -12,8 +12,11 @@ interface Props {
   placeholder?: string
   clearable?: boolean
   compact?: boolean
+  iconOnly?: boolean
+  icon?: string
   align?: 'left' | 'right'
   className?: string
+  title?: string
 }
 
 const WEEK = ['日', '一', '二', '三', '四', '五', '六']
@@ -109,16 +112,18 @@ export default function DateField(props: Props) {
       className={
         'datefield' +
         (props.compact ? ' compact' : '') +
+        (props.iconOnly ? ' icon-only' : '') +
         (props.className ? ' ' + props.className : '')
       }
     >
       <button
         ref={btnRef}
         type="button"
+        title={props.title}
         className={'datefield-btn' + (hasValue ? ' has-value' : '')}
         onClick={toggle}
       >
-        <span className="df-icon">▦</span>
+        <span className="df-icon">{props.icon || '▦'}</span>
         <span className={'df-text' + (hasValue ? '' : ' placeholder')}>
           {hasValue ? valueText : props.placeholder || '选择日期'}
         </span>

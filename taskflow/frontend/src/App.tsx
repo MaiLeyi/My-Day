@@ -259,9 +259,13 @@ export default function App() {
     }
   }
 
-  const schedule = async (taskId: string, iso: string) => {
+  const schedule = async (taskId: string, iso: string, start?: string, end?: string) => {
     try {
-      await api.scheduleTask(taskId, iso)
+      if (start !== undefined || end !== undefined) {
+        await api.updateTask(taskId, { planDate: iso, start: start || '', end: end || '' })
+      } else {
+        await api.scheduleTask(taskId, iso)
+      }
       await reload(iso ? '已排到 ' + iso : '已清除排期')
     } catch (err) {
       showToast((err as Error).message)
