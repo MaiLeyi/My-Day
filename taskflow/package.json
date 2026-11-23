@@ -9,8 +9,8 @@
     "frontend:dev": "cd frontend && npm run dev",
     "frontend:build": "cd frontend && npm run build",
     "web": "cd frontend && npm run dev",
-    "backend:build": "python -m PyInstaller --noconfirm --clean --distpath backend/dist --workpath backend/build backend/taskflow-backend.spec",
-    "backend:build:mac": "python3 -m PyInstaller --noconfirm --clean --distpath backend/dist --workpath backend/build backend/taskflow-backend.spec",
+    "backend:build": "python -m PyInstaller --noconfirm --distpath backend/dist --workpath backend/build backend/taskflow-backend.spec",
+    "backend:build:mac": "python3 -m PyInstaller --noconfirm --distpath backend/dist --workpath backend/build backend/taskflow-backend.spec",
     "electron:dev": "electron . --dev",
     "electron:prod": "npm run frontend:build && electron .",
     "electron": "electron .",
@@ -36,6 +36,7 @@
       "output": "release",
       "buildResources": "electron"
     },
+    "npmRebuild": false,
     "files": [
       "electron/**/*",
       "!electron/runtime.log",
@@ -89,7 +90,7 @@
       "createDesktopShortcut": true,
       "shortcutName": "任务流"
     },
-    "compression": "maximum"
+    "compression": "normal"
   },
   "engines": {
     "node": ">=18"

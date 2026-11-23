@@ -72,7 +72,6 @@ run('打包内置后端', python, [
   '-m',
   'PyInstaller',
   '--noconfirm',
-  '--clean',
   '--distpath',
   'backend/dist',
   '--workpath',
