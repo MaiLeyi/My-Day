@@ -41,6 +41,11 @@ function formatSize(size: number): string {
   return `${(size / 1024 / 1024).toFixed(1)} MB`
 }
 
+function timeToMinutes(time: string): number {
+  const [hours, minutes] = time.split(':').map(Number)
+  return hours * 60 + minutes
+}
+
 export default function DetailModal(props: Props) {
   const [draft, setDraft] = useState<TaskDraft>(() => props.draft || emptyDraft(props.task, props.projects))
   const [remarkOpen, setRemarkOpen] = useState(() => !!draft.remark)
@@ -75,6 +80,8 @@ export default function DetailModal(props: Props) {
       next.time = '开始和结束时间需要同时填写'
     } else if (hasStart && hasEnd && draft.start >= draft.end) {
       next.time = '结束时间需要晚于开始时间'
+    } else if (hasStart && hasEnd && timeToMinutes(draft.end) - timeToMinutes(draft.start) < 30) {
+      next.time = '时间段至少 30 分钟'
     } else if ((hasStart || hasEnd) && !draft.planDate) {
       next.time = '填写了时间，请同时选择计划日'
     }

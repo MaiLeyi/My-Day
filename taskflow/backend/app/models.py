@@ -1,12 +1,29 @@
 """请求 / 响应模型。"""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
 Status = Literal["todo", "done"]
 Priority = Literal["", "high", "mid", "low"]
+
+
+def validate_time_range(start: str, end: str) -> None:
+    """开始和结束时间均填写时，校验格式、先后顺序及最短 30 分钟。"""
+    if not start or not end:
+        return
+    try:
+        start_at = datetime.strptime(start, "%H:%M")
+        end_at = datetime.strptime(end, "%H:%M")
+    except ValueError:
+        raise ValueError("时间格式应为 HH:mm") from None
+    duration = (end_at - start_at).total_seconds() / 60
+    if duration <= 0:
+        raise ValueError("结束时间需要晚于开始时间")
+    if duration < 30:
+        raise ValueError("时间段至少 30 分钟")
 
 
 class Attachment(BaseModel):

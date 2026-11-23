@@ -30,6 +30,7 @@ interface Props {
 /** 半小时占 42px，保证事项标题 + 时间能完整展示。 */
 const HOUR_HEIGHT = 84
 const SNAP = 30
+const EDGE_SNAP = 1
 const MIN_DURATION = 30
 const DEFAULT_DURATION = 30
 
@@ -133,7 +134,7 @@ export default function WeekView(props: Props) {
     }
   }
 
-  /** 根据落点换算成 15 分钟对齐的开始时间。 */
+  /** 根据落点换算成 30 分钟对齐的开始时间。 */
   const minutesAt = (event: ReactDragEvent | ReactMouseEvent, duration: number): number => {
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
     const y = event.clientY - rect.top
@@ -164,16 +165,16 @@ export default function WeekView(props: Props) {
     props.onAddAt(iso, toTime(start), toTime(start + DEFAULT_DURATION))
   }
 
-  const snapMinutes = (y: number): number =>
-    clamp(Math.round((y / HOUR_HEIGHT) * 60 / SNAP) * SNAP, 0, 24 * 60)
+  const snapMinutes = (y: number, step = SNAP, max = 24 * 60): number =>
+    clamp(Math.round((y / HOUR_HEIGHT) * 60 / step) * step, 0, max)
 
-  /** 在空白时间列上按下并拖拽，圈选一段固定时间。 */
+  /** 在空白时间列上按分钟拖选时间段，最短 30 分钟。 */
   const beginSelect = (event: ReactMouseEvent, iso: string) => {
     if (event.button !== 0) return
     if ((event.target as HTMLElement).closest('.tl-event')) return
     event.preventDefault()
     const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
-    const startMin = snapMinutes(event.clientY - rect.top)
+    const startMin = snapMinutes(event.clientY - rect.top, EDGE_SNAP, 24 * 60 - 1)
     const first: SelectState = { day: iso, startMin, curMin: startMin, dragging: false }
     selectRef.current = first
     setSelect(first)
@@ -181,7 +182,7 @@ export default function WeekView(props: Props) {
     const onMove = (ev: MouseEvent) => {
       const current = selectRef.current
       if (!current) return
-      const curMin = snapMinutes(ev.clientY - rect.top)
+      const curMin = snapMinutes(ev.clientY - rect.top, EDGE_SNAP, 24 * 60 - 1)
       if (curMin === current.curMin) return
       const next: SelectState = { ...current, curMin, dragging: true }
       selectRef.current = next
@@ -198,7 +199,7 @@ export default function WeekView(props: Props) {
       if (!current || !current.dragging) return
       const from = Math.min(current.startMin, current.curMin)
       const to = Math.max(current.startMin, current.curMin)
-      if (to - from < SNAP) return
+      if (to - from < MIN_DURATION) return
       props.onAddAt(current.day, toTime(from), toTime(to))
     }
 
@@ -207,7 +208,7 @@ export default function WeekView(props: Props) {
     window.addEventListener('mouseup', finish)
   }
 
-  /** 拖动事项卡片上/下边界调整起止时间，最短 10 分钟。 */
+  /** 拖动事项卡片上/下边界按分钟调整起止时间，最短 30 分钟。 */
   const beginResize = (
     event: ReactPointerEvent,
     item: { task: Task; start: number; end: number },
@@ -235,13 +236,13 @@ export default function WeekView(props: Props) {
       const current = resizeRef.current
       if (!current) return
       const deltaMinutes = ((ev.clientY - current.pointerY) / HOUR_HEIGHT) * 60
-      const delta = Math.round(deltaMinutes / SNAP) * SNAP
+      const delta = Math.round(deltaMinutes / EDGE_SNAP) * EDGE_SNAP
       let start = current.start
       let end = current.end
       if (current.mode === 'start') {
         start = clamp(current.start + delta, 0, current.end - MIN_DURATION)
       } else {
-        end = clamp(current.end + delta, current.start + MIN_DURATION, 24 * 60)
+        end = clamp(current.end + delta, current.start + MIN_DURATION, 24 * 60 - 1)
       }
       const next = { ...current, previewStart: start, previewEnd: end }
       resizeRef.current = next

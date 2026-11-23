@@ -21,6 +21,7 @@ from .models import (
     FolderCreate,
     FolderUpdate,
     SettingsPayload,
+    validate_time_range,
 )
 
 PRIORITY_LABEL = {"high": "高", "mid": "中", "low": "低", "": "无"}
@@ -349,6 +350,7 @@ def delete_folder(fid: str) -> None:
 
 # ---------- 事项 ----------
 def create_task(payload: TaskCreate) -> dict:
+    validate_time_range(payload.start, payload.end)
     conn = connect()
     try:
         sort = conn.execute("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM tasks").fetchone()["s"]
@@ -381,6 +383,11 @@ def update_task(tid: str, payload: TaskUpdate) -> dict | None:
         if row is None:
             return None
         patch = payload.model_dump(exclude_unset=True)
+        if "start" in patch or "end" in patch:
+            validate_time_range(
+                patch.get("start", row["start_time"]) or "",
+                patch.get("end", row["end_time"]) or "",
+            )
         mapping = {
             "projectId": "project_id",
             "folderId": "folder_id",

@@ -139,12 +139,18 @@ def delete_folder(fid: str) -> Response:
 
 @app.post("/api/tasks", status_code=201)
 def create_task(payload: TaskCreate) -> dict:
-    return store.create_task(payload)
+    try:
+        return store.create_task(payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.patch("/api/tasks/{tid}")
 def update_task(tid: str, payload: TaskUpdate) -> dict:
-    result = store.update_task(tid, payload)
+    try:
+        result = store.update_task(tid, payload)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     if result is None:
         raise HTTPException(404, "事项不存在")
     return result

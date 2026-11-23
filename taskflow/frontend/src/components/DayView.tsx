@@ -6,7 +6,7 @@ import type {
 } from 'react'
 import { createPortal } from 'react-dom'
 import type { Folder, Project, Task } from '../types'
-import { PRIORITY_LABEL, fmt, getDragPayload, markConflicts, parseDate, projectColor, setDragPayload, today } from '../utils'
+import { fmt, getDragPayload, markConflicts, parseDate, projectColor, setDragPayload, today } from '../utils'
 import DateField from './DateField'
 
 interface Props {
@@ -30,9 +30,10 @@ interface Props {
   onPaste: (iso: string, start?: string) => void
 }
 
-/** 与本周视图保持一致：半小时占 42px，事项最小单位为半小时。 */
+/** 半小时占 42px；移动按半小时对齐，边界可按分钟调整且最短 30 分钟。 */
 const HOUR_HEIGHT = 84
 const SNAP = 30
+const EDGE_SNAP = 1
 const MIN_DURATION = 30
 const DEFAULT_DURATION = 30
 const MIN_EVENT_HEIGHT = (MIN_DURATION / 60) * HOUR_HEIGHT
@@ -88,6 +89,9 @@ interface ContextState {
   y: number
   task?: Task
   minute?: number
+  side?: boolean
+  /** 来自左侧未安排时间列表：仅可删除，不可复制 */
+  chip?: boolean
 }
 
 export default function DayView(props: Props) {
@@ -168,19 +172,20 @@ export default function DayView(props: Props) {
       const current = dragRef.current
       if (!current) return
       const deltaMinutes = ((ev.clientY - current.pointerY) / HOUR_HEIGHT) * 60
-      const delta = Math.round(deltaMinutes / SNAP) * SNAP
+      const snap = current.mode === 'move' ? SNAP : EDGE_SNAP
+      const delta = Math.round(deltaMinutes / snap) * snap
       let start = current.start
       let end = current.end
       if (current.mode === 'move') {
         const duration = current.end - current.start
-        start = clamp(current.start + delta, 0, 24 * 60 - duration)
+        start = clamp(current.start + delta, 0, 24 * 60 - 1 - duration)
         end = start + duration
       } else if (current.mode === 'start') {
         start = clamp(current.start + delta, 0, current.end - MIN_DURATION)
         end = current.end
       } else {
         start = current.start
-        end = clamp(current.end + delta, current.start + MIN_DURATION, 24 * 60)
+        end = clamp(current.end + delta, current.start + MIN_DURATION, 24 * 60 - 1)
       }
       const next: DragState = {
         ...current,
@@ -251,10 +256,10 @@ export default function DayView(props: Props) {
     props.onAddAt(props.date, toTime(minutes), toTime(minutes + DEFAULT_DURATION))
   }
 
-  const snapMinutes = (y: number): number =>
-    clamp(Math.round((y / HOUR_HEIGHT) * 60 / SNAP) * SNAP, 0, 24 * 60)
+  const snapMinutes = (y: number, step = SNAP, max = 24 * 60): number =>
+    clamp(Math.round((y / HOUR_HEIGHT) * 60 / step) * step, 0, max)
 
-  /** 在空白时间轴上按下并拖拽，圈选一段固定时间。 */
+  /** 在空白时间轴上按分钟拖选时间段，最短 30 分钟。 */
   const beginSelect = (event: ReactMouseEvent) => {
     if (event.button !== 0) return
     if ((event.target as HTMLElement).closest('.tl-event')) return
@@ -273,7 +278,7 @@ export default function DayView(props: Props) {
     if (nearCard) return
     event.preventDefault()
     const rect = el.getBoundingClientRect()
-    const startMin = snapMinutes(event.clientY - rect.top)
+    const startMin = snapMinutes(event.clientY - rect.top, EDGE_SNAP, 24 * 60 - 1)
     const first: SelectState = { startMin, curMin: startMin, dragging: false }
     selectRef.current = first
     setSelect(first)
@@ -281,7 +286,7 @@ export default function DayView(props: Props) {
     const onMove = (ev: MouseEvent) => {
       const current = selectRef.current
       if (!current) return
-      const curMin = snapMinutes(ev.clientY - rect.top)
+      const curMin = snapMinutes(ev.clientY - rect.top, EDGE_SNAP, 24 * 60 - 1)
       if (curMin === current.curMin) return
       const next: SelectState = { ...current, curMin, dragging: true }
       selectRef.current = next
@@ -298,7 +303,7 @@ export default function DayView(props: Props) {
       if (!current || !current.dragging) return
       const from = Math.min(current.startMin, current.curMin)
       const to = Math.max(current.startMin, current.curMin)
-      if (to - from < SNAP) return
+      if (to - from < MIN_DURATION) return
       props.onAddAt(props.date, toTime(from), toTime(to))
     }
 
@@ -307,13 +312,14 @@ export default function DayView(props: Props) {
     window.addEventListener('mouseup', finish)
   }
 
-  const openContext = (event: ReactMouseEvent, task: Task) => {
+  const openContext = (event: ReactMouseEvent, task: Task, chip = false) => {
     event.preventDefault()
     event.stopPropagation()
     setCtx({
       x: Math.min(event.clientX, window.innerWidth - 170),
       y: Math.min(event.clientY, window.innerHeight - 110),
       task,
+      chip,
     })
   }
 
@@ -327,6 +333,17 @@ export default function DayView(props: Props) {
       x: Math.min(event.clientX, window.innerWidth - 190),
       y: Math.min(event.clientY, window.innerHeight - 130),
       minute,
+    })
+  }
+
+  /** 在未安排列表空白处右键：新增当天的未安排事项。 */
+  const openSideEmptyContext = (event: ReactMouseEvent) => {
+    if ((event.target as HTMLElement).closest('.tl-chip')) return
+    event.preventDefault()
+    setCtx({
+      x: Math.min(event.clientX, window.innerWidth - 170),
+      y: Math.min(event.clientY, window.innerHeight - 70),
+      side: true,
     })
   }
 
@@ -348,12 +365,6 @@ export default function DayView(props: Props) {
           </button>
         )}
         <span className="day-count">{timed.length} 项已排时间 · {untimed.length} 项待安排</span>
-        <button
-          className="btn btn-ghost day-add-btn"
-          onClick={() => props.onAddDay(props.date)}
-        >
-          ＋ 新增
-        </button>
       </div>
 
       <div className="timeline-wrap">
@@ -362,7 +373,7 @@ export default function DayView(props: Props) {
             未安排时间 <span>{untimed.length}</span>
           </div>
           <div className="tl-side-hint">拖到右侧时间轴即可排期，默认 30 分钟</div>
-          <div className="tl-side-list">
+          <div className="tl-side-list" onContextMenu={openSideEmptyContext}>
             {untimed.map((t) => {
               const project = props.projects.find((p) => p.id === t.projectId)
               return (
@@ -370,14 +381,17 @@ export default function DayView(props: Props) {
                   key={t.id}
                   data-task-id={t.id}
                   className={
-                    'tl-chip pri-' + (t.priority || 'none') + (props.focusId === t.id ? ' flash' : '')
+                    'tl-chip pri-' +
+                    (t.priority || 'none') +
+                    (t.status === 'done' ? ' done' : '') +
+                    (props.focusId === t.id ? ' flash' : '')
                   }
                   style={{ ['--ev-c' as string]: projectColor(project?.shade) }}
                   draggable={!props.batchMode}
                   onDragStart={(e) => beginTaskDrag(e, t.id)}
                   onDragEnd={() => setDragPayload(null)}
                   onClick={() => props.onOpen(t.id)}
-                  onContextMenu={(e) => openContext(e, t)}
+                  onContextMenu={(e) => openContext(e, t, true)}
                   title="拖到右侧时间轴安排时间"
                 >
                   <div className="tl-chip-main">
@@ -394,14 +408,7 @@ export default function DayView(props: Props) {
                       </button>
                       <div className="tl-chip-title">{t.title}</div>
                     </div>
-                    <div className="tl-chip-time">
-                      {t.start ? t.start + (t.end ? ' – ' + t.end : '') : '未排期'}
-                    </div>
-                    <div className="tl-chip-meta">
-                      <span>{project?.name || '未归类'}</span>
-                      {t.dueDate === props.date && t.planDate !== props.date && <span className="tl-due">当日截止</span>}
-                      {t.priority && <span>· {PRIORITY_LABEL[t.priority]}优先级</span>}
-                    </div>
+                    <div className="tl-chip-time">未排期</div>
                   </div>
                 </div>
               )
@@ -537,15 +544,17 @@ export default function DayView(props: Props) {
             >
               {ctx.task ? (
                 <>
-                  <button
-                    onClick={() => {
-                      const task = ctx.task!
-                      setCtx(null)
-                      props.onCopyTask(task)
-                    }}
-                  >
-                    ⧉ 复制事项
-                  </button>
+                  {!ctx.chip && (
+                    <button
+                      onClick={() => {
+                        const task = ctx.task!
+                        setCtx(null)
+                        props.onCopyTask(task)
+                      }}
+                    >
+                      ⧉ 复制事项
+                    </button>
+                  )}
                   <button
                     className="danger"
                     onClick={() => {
@@ -557,6 +566,15 @@ export default function DayView(props: Props) {
                     ✕ 删除事项
                   </button>
                 </>
+              ) : ctx.side ? (
+                <button
+                  onClick={() => {
+                    setCtx(null)
+                    props.onAddDay(props.date)
+                  }}
+                >
+                  ＋ 新增事项
+                </button>
               ) : (
                 <>
                   <button

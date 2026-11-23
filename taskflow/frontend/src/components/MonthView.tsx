@@ -96,11 +96,11 @@ export default function MonthView(props: Props) {  const [hint, setHint] = useSt
       <div className="cal-grid">
         {cells.map((cell) => {
           // 月视图展示当天所有事项（含未排具体时间的），完全无日期的不展示
-          // 排序：未排时间的在前（按创建时间升序），已排时间的在后（按开始时间升序）
+          // 排序：已排时间的在前（按开始时间升序），未排时间的在后（按创建时间升序）
           const planned = props.tasks
             .filter((t) => t.planDate === cell.iso)
             .sort((a, b) => {
-              if (!!a.start !== !!b.start) return a.start ? 1 : -1
+              if (!!a.start !== !!b.start) return a.start ? -1 : 1
               if (a.start && b.start) return a.start.localeCompare(b.start)
               return a.createdAt.localeCompare(b.createdAt)
             })

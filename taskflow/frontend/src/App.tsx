@@ -266,12 +266,8 @@ export default function App() {
     return true
   })
 
-  const boardTasks = tasks.filter((t) => {
-    if (!inScope(t)) return false
-    if (archivedIds.has(t.projectId)) return false
-    if (q && !t.title.toLowerCase().includes(q)) return false
-    return true
-  })
+  // 日历 / 本周 / 日程视图不继承清单页的项目范围与搜索条件，始终展示全部事项
+  const boardTasks = tasks.filter((t) => !archivedIds.has(t.projectId))
 
   const scopeName = scope
     ? scope.type === 'project'
@@ -712,7 +708,7 @@ export default function App() {
                   </button>
                 )}
                 <h2>{viewTitle}</h2>
-                {scope && (
+                {view === 'list' && scope && (
                   <button className="scope-tag" onClick={() => selectScope(null)}>
                     范围：{scopeName} ✕
                   </button>
