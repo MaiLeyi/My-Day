@@ -3,9 +3,9 @@ import type { ReactNode } from 'react'
 import { api } from './api'
 import ConfirmDialog from './components/ConfirmDialog'
 import type { AskConfirmOptions } from './components/ConfirmDialog'
+import DataView from './components/DataView'
 import DayView from './components/DayView'
 import DetailModal from './components/DetailModal'
-import ExportModal from './components/ExportModal'
 import FilterBar from './components/FilterBar'
 import ListView from './components/ListView'
 import MonthView from './components/MonthView'
@@ -16,6 +16,7 @@ import Sidebar from './components/Sidebar'
 import WeekView from './components/WeekView'
 import type {
   Bootstrap,
+  DataDrill,
   Priority,
   Scope,
   Settings,
@@ -91,6 +92,18 @@ const NAV_ITEMS: { key: View; label: string; icon: ReactNode }[] = [
       </svg>
     ),
   },
+  {
+    key: 'data',
+    label: '数据',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M4 20h16" />
+        <rect x="6" y="11" width="3" height="6" rx="1" />
+        <rect x="11" y="6" width="3" height="11" rx="1" />
+        <rect x="16" y="13" width="3" height="4" rx="1" />
+      </svg>
+    ),
+  },
 ]
 
 function ViewRail(props: { view: View; onChangeView: (view: View) => void; onOpenSettings: () => void }) {
@@ -160,6 +173,7 @@ export default function App() {
   const [dateFilter, setDateFilter] = useState('')
   const [priorityFilter, setPriorityFilter] = useState<'' | Priority>('')
   const [overdueOnly, setOverdueOnly] = useState(false)
+  const [dataFilter, setDataFilter] = useState<DataDrill | null>(null)
   const [prioritySort, setPrioritySort] = useState(false)
   const [batchMode, setBatchMode] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
@@ -172,10 +186,11 @@ export default function App() {
   const focusTimer = useRef<number | undefined>(undefined)
   const [projectModal, setProjectModal] = useState<{ projectId?: string } | null>(null)
   const [folderPromptProject, setFolderPromptProject] = useState('')
-  const [exportOpen, setExportOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [previewTheme, setPreviewTheme] = useState<Theme | null>(null)
   const [confirm, setConfirm] = useState<ConfirmState>(null)
+  // 内部事项剪贴板：复制后可在日程 / 本周 / 日历中粘贴
+  const clipboardRef = useRef<Task | null>(null)
 
   useEffect(() => {
     api
@@ -238,6 +253,11 @@ export default function App() {
     if (!matchStatus(t) || !inScope(t)) return false
     if (statusFilter !== 'done' && !showDone && t.status === 'done' && !keepDoneIds.has(t.id)) return false
     if (archivedIds.has(t.projectId)) return false
+    if (dataFilter) {
+      if (dataFilter.planDate && t.planDate !== dataFilter.planDate) return false
+      if (dataFilter.dueDate && t.dueDate !== dataFilter.dueDate) return false
+      if (dataFilter.unscheduled && t.planDate) return false
+    }
     if (dateFilter && statusFilter !== 'unplanned' && !(t.planDate === dateFilter || t.dueDate === dateFilter))
       return false
     if (priorityFilter && t.priority !== priorityFilter) return false
@@ -255,7 +275,7 @@ export default function App() {
 
   const scopeName = scope
     ? scope.type === 'project'
-      ? projects.find((p) => p.id === scope.id)?.name || ''
+      ? projects.find((p) => p.id === scope.id)?.name || '未归类'
       : folders.find((f) => f.id === scope.id)?.name || ''
     : ''
 
@@ -269,6 +289,7 @@ export default function App() {
     setPriorityFilter('')
     setOverdueOnly(false)
     setPrioritySort(false)
+    setDataFilter(null)
   }
 
   const selectScope = (next: Scope | null) => {
@@ -288,10 +309,33 @@ export default function App() {
     setView(next)
     setDetail(null)
     setNavOpen(false)
+    setDataFilter(null)
     if (next !== 'list') {
       setBatchMode(false)
       setSelected(new Set())
     }
+  }
+
+  /** 数据页指标点击：带着对应条件跳到清单页看明细。 */
+  const drillFromData = (drill: DataDrill) => {
+    changeView('list')
+    setDataFilter(drill)
+    setScope(drill.projectId !== undefined ? { type: 'project', id: drill.projectId } : null)
+    setStatusFilter(drill.status || (drill.overdue ? 'todo' : 'all'))
+    setShowDone(!drill.status && !drill.overdue)
+    setOverdueOnly(!!drill.overdue)
+    setDateFilter('')
+    setPriorityFilter('')
+    setPrioritySort(false)
+    setQuery('')
+  }
+
+  /** 清除数据页带入的筛选，恢复到清单默认状态（保留当前项目范围）。 */
+  const clearDataFilter = () => {
+    setDataFilter(null)
+    setStatusFilter('all')
+    setShowDone(false)
+    setOverdueOnly(false)
   }
 
   const openNewInScope = () => {
@@ -423,6 +467,57 @@ export default function App() {
         await reload('已删除')
       },
     })
+  }
+
+  const timeToMin = (time: string): number => {
+    const [h, m] = time.split(':').map(Number)
+    return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0)
+  }
+
+  const minToTime = (value: number): string => {
+    const clamped = Math.max(0, Math.min(24 * 60 - 1, value))
+    return `${String(Math.floor(clamped / 60)).padStart(2, '0')}:${String(clamped % 60).padStart(2, '0')}`
+  }
+
+  /** 复制事项到内部剪贴板，随后可在日程 / 本周 / 日历中通过 Ctrl/⌘+V 粘贴。 */
+  const copyTask = (task: Task) => {
+    clipboardRef.current = task
+    showToast('已复制事项，在日程 / 本周 / 日历空白处右键即可粘贴')
+  }
+
+  /** 粘贴事项：保留复制时的内容，按目标日期与时间生成新的未处理事项。 */
+  const pasteTask = async (planDate: string, start?: string) => {
+    if (detail) return
+    const source = clipboardRef.current
+    if (!source) {
+      showToast('先右键复制一条事项，再粘贴')
+      return
+    }
+    const duration =
+      source.start && source.end ? Math.max(30, timeToMin(source.end) - timeToMin(source.start)) : 30
+    const from = start || source.start || '09:00'
+    const to = minToTime(timeToMin(from) + duration)
+    try {
+      await api.createTask({
+        title: source.title,
+        projectId: source.projectId,
+        folderId: source.folderId,
+        status: 'todo',
+        priority: source.priority,
+        planDate,
+        dueDate: source.dueDate,
+        start: from,
+        end: to,
+        desc: source.desc,
+        remark: source.remark,
+        images: source.images,
+        attachments: source.attachments,
+        needReview: source.needReview,
+      })
+      await reload('已粘贴事项')
+    } catch (err) {
+      showToast((err as Error).message)
+    }
   }
 
   const runConfirm = async (state: ConfirmState) => {
@@ -560,7 +655,16 @@ export default function App() {
     }
   }
 
-  const viewTitle = view === 'list' ? '全部事项' : view === 'week' ? '本周' : view === 'day' ? '日程' : '日历'
+  const viewTitle =
+    view === 'list'
+      ? '全部事项'
+      : view === 'week'
+        ? '本周'
+        : view === 'day'
+          ? '日程'
+          : view === 'data'
+            ? '数据'
+            : '日历'
 
   return (
     <div className={'app' + (batchMode ? ' batch' : '') + (navOpen ? ' nav-open' : '')}>
@@ -581,7 +685,6 @@ export default function App() {
             onNewProject={() => setProjectModal({})}
             onEditProject={(projectId) => setProjectModal({ projectId })}
             onNewFolder={(projectId) => setFolderPromptProject(projectId)}
-            onNewTask={(projectId, folderId) => openNew({ projectId, folderId })}
             onArchive={archiveProject}
             onUnarchive={unarchiveProject}
             onDeleteProject={deleteProject}
@@ -596,7 +699,6 @@ export default function App() {
               setBatchMode(false)
               setSelected(new Set())
             }}
-            onExport={() => setExportOpen(true)}
           />
         )}
 
@@ -613,6 +715,11 @@ export default function App() {
                 {scope && (
                   <button className="scope-tag" onClick={() => selectScope(null)}>
                     范围：{scopeName} ✕
+                  </button>
+                )}
+                {view === 'list' && dataFilter && (
+                  <button className="scope-tag" onClick={clearDataFilter} title="清除从数据页带入的筛选">
+                    数据：{dataFilter.label} ✕
                   </button>
                 )}
                 <div className="spacer" />
@@ -671,12 +778,18 @@ export default function App() {
                 onToday={() => setMonthCursor(new Date())}
                 onSelectDay={setSelDay}
                 onAddDay={addOnDay}
+                onOpenDay={(iso) => {
+                  setDayDate(iso)
+                  setView('day')
+                }}
                 focusId={focusId}
                 onOpen={openTask}
                 onSchedule={schedule}
                 onEdit={openTask}
                 onToggleStatus={toggleStatus}
                 onDeleteTask={askDeleteTask}
+                onCopyTask={copyTask}
+                onPaste={(iso, start) => pasteTask(iso, start)}
               />
             )}
 
@@ -699,6 +812,8 @@ export default function App() {
                 onScheduleRange={updateTaskTime}
                 onToggleStatus={toggleStatus}
                 onDeleteTask={askDeleteTask}
+                onCopyTask={copyTask}
+                onPaste={(iso, start) => pasteTask(iso, start)}
               />
             )}
 
@@ -720,8 +835,12 @@ export default function App() {
                 onDropTask={dropTaskOnTask}
                 onToggleStatus={toggleStatus}
                 onDeleteTask={askDeleteTask}
+                onCopyTask={copyTask}
+                onPaste={(iso, start) => pasteTask(iso, start)}
               />
             )}
+
+            {view === 'data' && <DataView tasks={tasks} projects={projects} onDrill={drillFromData} />}
           </div>
           {detail && (detail.taskId ? detailTask : true) && (
             <DetailModal
@@ -779,19 +898,12 @@ export default function App() {
         />
       )}
 
-      {exportOpen && (
-        <ExportModal
-          tasks={tasks}
-          projects={projects}
-          folders={folders}
-          onClose={() => setExportOpen(false)}
-          onToast={showToast}
-        />
-      )}
-
       {settingsOpen && (
         <SettingsModal
           settings={settings}
+          tasks={tasks}
+          projects={projects}
+          folders={folders}
           onClose={() => setSettingsOpen(false)}
           onSaved={(next: Settings) => setData((prev) => (prev ? { ...prev, settings: next } : prev))}
           onPreviewTheme={setPreviewTheme}

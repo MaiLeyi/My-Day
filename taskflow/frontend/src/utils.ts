@@ -89,8 +89,12 @@ export function download(blob: Blob, filename: string): void {
   const a = document.createElement('a')
   a.href = url
   a.download = filename
+  a.style.display = 'none'
+  // 必须挂到文档里再点击，Electron / 部分浏览器对游离节点的下载不生效
+  document.body.appendChild(a)
   a.click()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 5000)
 }
 
 export interface MonthCell {

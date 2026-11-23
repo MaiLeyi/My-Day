@@ -1,6 +1,6 @@
 export type Status = 'todo' | 'done'
 export type Priority = '' | 'high' | 'mid' | 'low'
-export type View = 'list' | 'month' | 'week' | 'day'
+export type View = 'list' | 'month' | 'week' | 'day' | 'data'
 export type Theme = 'soft' | 'warm' | 'blue' | 'dark'
 
 export interface Project {
@@ -155,3 +155,16 @@ export interface AiContext {
 }
 
 export type StatusFilter = 'all' | 'todo' | 'done' | 'unplanned'
+
+/** 数据页指标点击后带入清单页的筛选条件。 */
+export interface DataDrill {
+  /** 展示在清单页的筛选标签，如「今日已处理」。 */
+  label: string
+  /** undefined 表示不限项目；'' 表示未归类事项。 */
+  projectId?: string
+  status?: Status
+  planDate?: string
+  dueDate?: string
+  unscheduled?: boolean
+  overdue?: boolean
+}

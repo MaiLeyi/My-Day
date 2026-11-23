@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react'
 import type { Folder, Project, Scope, Task } from '../types'
 import type { DragPayload } from '../utils'
@@ -23,7 +22,6 @@ interface Props {
   onNewProject: () => void
   onEditProject: (projectId: string) => void
   onNewFolder: (projectId: string) => void
-  onNewTask: (projectId: string, folderId?: string) => void
   onArchive: (id: string) => void
   onUnarchive: (id: string) => void
   onDeleteProject: (id: string) => void
@@ -32,7 +30,6 @@ interface Props {
   onToggleBatch: () => void
   onBatchDelete: () => void
   onCancelBatch: () => void
-  onExport: () => void
 }
 
 const loadWidth = (): number => {
@@ -48,7 +45,6 @@ const loadWidth = (): number => {
 export default function Sidebar(props: Props) {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [dragOver, setDragOver] = useState('')
-  const [menu, setMenu] = useState<{ projectId: string; top: number; left: number } | null>(null)
   const [sideW, setSideW] = useState<number>(loadWidth)
   const asideRef = useRef<HTMLElement>(null)
   const resizing = useRef(false)
@@ -97,15 +93,6 @@ export default function Sidebar(props: Props) {
       if (next.has(id)) next.delete(id)
       else next.add(id)
       return next
-    })
-  }
-
-  const openMenu = (projectId: string, el: HTMLElement) => {
-    const rect = el.getBoundingClientRect()
-    setMenu({
-      projectId,
-      top: Math.min(rect.bottom + 4, window.innerHeight - 120),
-      left: Math.min(rect.left, window.innerWidth - 170),
     })
   }
 
@@ -234,10 +221,10 @@ export default function Sidebar(props: Props) {
                 <span className="row-actions">
                   <button
                     className="mini"
-                    title="新建分组 / 事项"
+                    title="新建分组"
                     onClick={(e) => {
                       e.stopPropagation()
-                      openMenu(p.id, e.currentTarget)
+                      props.onNewFolder(p.id)
                     }}
                   >
                     ＋
@@ -364,47 +351,9 @@ export default function Sidebar(props: Props) {
       </button>
       <div className="side-foot">
         <button onClick={props.onToggleBatch}>☑ 选择</button>
-        <button onClick={props.onExport}>⇩ 导出</button>
       </div>
 
       <div className="sidebar-resizer" onMouseDown={startResize} title="拖动调整侧边栏宽度" />
-
-      {menu &&
-        createPortal(
-          <>
-            <div className="ctx-backdrop" onClick={() => setMenu(null)} />
-            <div className="ctx-menu" style={{ top: menu.top, left: menu.left }}>
-              <button
-                onClick={() => {
-                  const projectId = menu.projectId
-                  setMenu(null)
-                  props.onNewFolder(projectId)
-                }}
-              >
-                新建分组
-              </button>
-              <button
-                onClick={() => {
-                  const projectId = menu.projectId
-                  setMenu(null)
-                  props.onNewTask(projectId)
-                }}
-              >
-                新建事项
-              </button>
-              <button
-                onClick={() => {
-                  const projectId = menu.projectId
-                  setMenu(null)
-                  props.onEditProject(projectId)
-                }}
-              >
-                编辑项目
-              </button>
-            </div>
-          </>,
-          document.body,
-        )}
     </aside>
   )
 }

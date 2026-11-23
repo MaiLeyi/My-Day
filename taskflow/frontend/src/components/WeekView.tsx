@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react'
 import type {
   DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 import type { Project, Task } from '../types'
-import { STATUS, getDragPayload, markConflicts, projectColor, setDragPayload, weekDays } from '../utils'
+import { getDragPayload, markConflicts, projectColor, setDragPayload, weekDays } from '../utils'
 
 interface Props {
   offset: number
@@ -21,10 +23,14 @@ interface Props {
   onScheduleRange: (taskId: string, iso: string, start: string, end: string) => void
   onToggleStatus: (task: Task) => void
   onDeleteTask: (task: Task) => void
+  onCopyTask: (task: Task) => void
+  onPaste: (iso: string, start?: string) => void
 }
 
-const HOUR_HEIGHT = 42
-const SNAP = 15
+/** 半小时占 42px，保证事项标题 + 时间能完整展示。 */
+const HOUR_HEIGHT = 84
+const SNAP = 30
+const MIN_DURATION = 30
 const DEFAULT_DURATION = 30
 
 function toMinutes(time: string): number {
@@ -50,6 +56,25 @@ interface SelectState {
   dragging: boolean
 }
 
+interface ResizeState {
+  taskId: string
+  day: string
+  mode: 'start' | 'end'
+  pointerY: number
+  start: number
+  end: number
+  previewStart: number
+  previewEnd: number
+}
+
+interface ContextState {
+  x: number
+  y: number
+  task?: Task
+  iso?: string
+  minute?: number
+}
+
 export default function WeekView(props: Props) {
   const days = weekDays(props.offset)
   const label = props.offset === 0 ? '本周' : props.offset > 0 ? `未来第 ${props.offset} 周` : `过去第 ${-props.offset} 周`
@@ -58,6 +83,11 @@ export default function WeekView(props: Props) {
   const selectRef = useRef<SelectState | null>(null)
   const selectCleanupRef = useRef<(() => void) | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [resize, setResize] = useState<ResizeState | null>(null)
+  const resizeRef = useRef<ResizeState | null>(null)
+  const resizeCleanupRef = useRef<(() => void) | null>(null)
+  const skipClickRef = useRef(false)
+  const [ctx, setCtx] = useState<ContextState | null>(null)
 
   useEffect(() => {
     const el = scrollRef.current
@@ -72,6 +102,24 @@ export default function WeekView(props: Props) {
   }, [props.focusId, props.tasks])
 
   useEffect(() => () => selectCleanupRef.current?.(), [])
+  useEffect(() => () => resizeCleanupRef.current?.(), [])
+
+  // 右键菜单：点击空白、滚动或 Esc 关闭
+  useEffect(() => {
+    if (!ctx) return
+    const close = () => setCtx(null)
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCtx(null)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [ctx])
 
   const beginTaskDrag = (event: ReactDragEvent, id: string) => {
     setDragPayload({ type: 'task', id })
@@ -104,18 +152,10 @@ export default function WeekView(props: Props) {
     if (task?.start) {
       const start = toMinutes(task.start)
       const end = task.end ? toMinutes(task.end) : start + DEFAULT_DURATION
-      duration = Math.max(SNAP, end - start)
+      duration = Math.max(MIN_DURATION, end - start)
     }
     const start = minutesAt(event, duration)
     props.onScheduleRange(payload.id, iso, toTime(start), toTime(start + duration))
-  }
-
-  const dropOnAllDay = (event: ReactDragEvent, iso: string) => {
-    event.preventDefault()
-    const payload = getDragPayload()
-    setDragPayload(null)
-    if (payload?.type !== 'task') return
-    props.onScheduleRange(payload.id, iso, '', '')
   }
 
   const addFromColumn = (event: ReactMouseEvent, iso: string) => {
@@ -167,6 +207,92 @@ export default function WeekView(props: Props) {
     window.addEventListener('mouseup', finish)
   }
 
+  /** 拖动事项卡片上/下边界调整起止时间，最短 10 分钟。 */
+  const beginResize = (
+    event: ReactPointerEvent,
+    item: { task: Task; start: number; end: number },
+    iso: string,
+    mode: 'start' | 'end',
+  ) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    skipClickRef.current = true
+    const state: ResizeState = {
+      taskId: item.task.id,
+      day: iso,
+      mode,
+      pointerY: event.clientY,
+      start: item.start,
+      end: item.end,
+      previewStart: item.start,
+      previewEnd: item.end,
+    }
+    resizeRef.current = state
+    setResize(state)
+
+    const onMove = (ev: PointerEvent) => {
+      const current = resizeRef.current
+      if (!current) return
+      const deltaMinutes = ((ev.clientY - current.pointerY) / HOUR_HEIGHT) * 60
+      const delta = Math.round(deltaMinutes / SNAP) * SNAP
+      let start = current.start
+      let end = current.end
+      if (current.mode === 'start') {
+        start = clamp(current.start + delta, 0, current.end - MIN_DURATION)
+      } else {
+        end = clamp(current.end + delta, current.start + MIN_DURATION, 24 * 60)
+      }
+      const next = { ...current, previewStart: start, previewEnd: end }
+      resizeRef.current = next
+      setResize(next)
+    }
+
+    const finish = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', finish)
+      resizeCleanupRef.current = null
+      const current = resizeRef.current
+      resizeRef.current = null
+      setResize(null)
+      // 等本次 click 事件结束后再恢复卡片点击
+      window.setTimeout(() => {
+        skipClickRef.current = false
+      }, 0)
+      if (!current) return
+      if (current.previewStart !== current.start || current.previewEnd !== current.end) {
+        props.onScheduleRange(current.taskId, current.day, toTime(current.previewStart), toTime(current.previewEnd))
+      }
+    }
+
+    resizeCleanupRef.current = finish
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', finish)
+  }
+
+  const openContext = (event: ReactMouseEvent, task: Task) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setCtx({
+      x: Math.min(event.clientX, window.innerWidth - 170),
+      y: Math.min(event.clientY, window.innerHeight - 110),
+      task,
+    })
+  }
+
+  /** 在空白时间列右键：可在当前位置新增或粘贴事项。 */
+  const openEmptyContext = (event: ReactMouseEvent, iso: string) => {
+    if ((event.target as HTMLElement).closest('.tl-event')) return
+    event.preventDefault()
+    const rect = event.currentTarget.getBoundingClientRect()
+    setCtx({
+      x: Math.min(event.clientX, window.innerWidth - 190),
+      y: Math.min(event.clientY, window.innerHeight - 130),
+      iso,
+      minute: snapMinutes(event.clientY - rect.top),
+    })
+  }
+
   const hours = Array.from({ length: 24 }, (_, i) => i)
   const now = new Date()
   const nowTop = ((now.getHours() * 60 + now.getMinutes()) / 60) * HOUR_HEIGHT
@@ -194,15 +320,9 @@ export default function WeekView(props: Props) {
       <div className="wk-scroll" ref={scrollRef}>
         <div className="wk-inner">
           <div className="wk-head">
-            <div className="wk-corner">全天</div>
+            <div className="wk-corner">时间</div>
             {days.map((day) => {
               const timedCount = props.tasks.filter((t) => t.planDate === day.iso && t.start).length
-              const allDayCount = props.tasks.filter(
-                (t) =>
-                  (t.planDate === day.iso && !t.start) ||
-                  (t.dueDate === day.iso && t.planDate !== day.iso),
-              ).length
-              const total = timedCount + allDayCount
               return (
                 <div key={day.iso} className={'wk-dayhead' + (day.isToday ? ' today' : '')}>
                   <button
@@ -213,7 +333,7 @@ export default function WeekView(props: Props) {
                     <b>{day.weekday}</b>
                     <span>{day.label}</span>
                   </button>
-                  {total > 0 && <span className="wk-daycount">{total}</span>}
+                  {timedCount > 0 && <span className="wk-daycount">{timedCount}</span>}
                   <button
                     className="wk-dayadd"
                     title="在此日新增"
@@ -221,50 +341,6 @@ export default function WeekView(props: Props) {
                   >
                     ＋
                   </button>
-                </div>
-              )
-            })}
-          </div>
-
-          <div className="wk-allday-row">
-            <div className="wk-allday-gutter">未安排</div>
-            {days.map((day) => {
-              const allDay = props.tasks.filter(
-                (t) =>
-                  (t.planDate === day.iso && !t.start) ||
-                  (t.dueDate === day.iso && t.planDate !== day.iso),
-              )
-              return (
-                <div
-                  key={day.iso}
-                  className={'wk-allday' + (day.isToday ? ' today' : '')}
-                  onDragOver={(e) => {
-                    if (getDragPayload()?.type === 'task') e.preventDefault()
-                  }}
-                  onDrop={(e) => dropOnAllDay(e, day.iso)}
-                >
-                  {allDay.map((t) => (
-                    <div
-                      key={t.id}
-                      data-task-id={t.id}
-                      className={
-                        'wk-chip pri-' +
-                        (t.priority || 'none') +
-                        (props.focusId === t.id ? ' flash' : '')
-                      }
-                      draggable
-                      onDragStart={(e) => beginTaskDrag(e, t.id)}
-                      onDragEnd={() => setDragPayload(null)}
-                      onClick={() => props.onOpen(t.id)}
-                      title={t.title}
-                    >
-                      <span className="wk-chip-title">{t.title}</span>
-                      {t.dueDate === day.iso && t.planDate !== day.iso && (
-                        <span className="wk-chip-tag">截止</span>
-                      )}
-                    </div>
-                  ))}
-                  {allDay.length === 0 && <span className="wk-allday-empty">—</span>}
                 </div>
               )
             })}
@@ -296,6 +372,7 @@ export default function WeekView(props: Props) {
                     (dragOver === day.iso ? ' drag-over' : '')
                   }
                   data-day={day.iso}
+                  onContextMenu={(e) => openEmptyContext(e, day.iso)}
                   onDragOver={(e) => {
                     if (getDragPayload()?.type === 'task') {
                       e.preventDefault()
@@ -332,9 +409,12 @@ export default function WeekView(props: Props) {
                     </div>
                   )}
                   {timed.map((item) => {
-                    const top = (item.start / 60) * HOUR_HEIGHT
-                    const height = Math.max(20, ((item.end - item.start) / 60) * HOUR_HEIGHT)
-                    const size = height < 30 ? ' compact' : height < 44 ? ' mid' : ''
+                    const preview =
+                      resize && resize.taskId === item.task.id && resize.day === day.iso ? resize : null
+                    const start = preview ? preview.previewStart : item.start
+                    const end = preview ? preview.previewEnd : item.end
+                    const top = (start / 60) * HOUR_HEIGHT
+                    const height = Math.max((MIN_DURATION / 60) * HOUR_HEIGHT, ((end - start) / 60) * HOUR_HEIGHT)
                     const project = props.projects.find((p) => p.id === item.task.projectId)
                     return (
                       <div
@@ -344,16 +424,38 @@ export default function WeekView(props: Props) {
                           'tl-event wk-ev' +
                           (item.task.status === 'done' ? ' done' : '') +
                           (item.conflict ? ' conflict' : '') +
-                          (props.focusId === item.task.id ? ' flash' : '') +
-                          size
+                          (preview ? ' dragging' : '') +
+                          (props.focusId === item.task.id ? ' flash' : '')
                         }
-                        style={{ top, height, left: 2, right: 2, borderLeftColor: projectColor(project?.shade) }}
+                        style={{
+                          top,
+                          height,
+                          left: 2,
+                          right: 2,
+                          ['--ev-c' as string]: projectColor(project?.shade),
+                        }}
                         draggable
-                        onDragStart={(e) => beginTaskDrag(e, item.task.id)}
+                        onDragStart={(e) => {
+                          // 正在调整边界时不允许触发跨天拖动
+                          if (resizeRef.current) {
+                            e.preventDefault()
+                            return
+                          }
+                          beginTaskDrag(e, item.task.id)
+                        }}
                         onDragEnd={() => setDragPayload(null)}
-                        onClick={() => props.onOpen(item.task.id)}
+                        onClick={() => {
+                          if (skipClickRef.current) return
+                          props.onOpen(item.task.id)
+                        }}
+                        onContextMenu={(e) => openContext(e, item.task)}
                         title={`${item.task.title} ${toTime(item.start)}–${toTime(item.end)}${item.conflict ? '（时间冲突）' : ''}`}
                       >
+                        <div
+                          className="tl-handle top"
+                          onPointerDown={(e) => beginResize(e, item, day.iso, 'start')}
+                          title="拖动调整开始时间"
+                        />
                         <div className="tl-event-head">
                           <button
                             className={'tl-check small ' + item.task.status}
@@ -372,21 +474,13 @@ export default function WeekView(props: Props) {
                           </span>
                         </div>
                         <div className="tl-event-time">
-                          {toTime(item.start)} – {toTime(item.end)}
+                          {toTime(start)} – {toTime(end)}
                         </div>
-                        <div className="tl-event-status">{STATUS[item.task.status]}</div>
-                        <div className="tl-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            className="tact-mini danger"
-                            title="删除事项"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              props.onDeleteTask(item.task)
-                            }}
-                          >
-                            ✕
-                          </button>
-                        </div>
+                        <div
+                          className="tl-handle bottom"
+                          onPointerDown={(e) => beginResize(e, item, day.iso, 'end')}
+                          title="拖动调整结束时间"
+                        />
                       </div>
                     )
                   })}
@@ -396,6 +490,67 @@ export default function WeekView(props: Props) {
           </div>
         </div>
       </div>
+
+      {ctx &&
+        createPortal(
+          <>
+            <div className="ctx-backdrop" onMouseDown={() => setCtx(null)} />
+            <div
+              className="ctx-menu"
+              style={{ left: ctx.x, top: ctx.y }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              {ctx.task ? (
+                <>
+                  <button
+                    onClick={() => {
+                      const task = ctx.task!
+                      setCtx(null)
+                      props.onCopyTask(task)
+                    }}
+                  >
+                    ⧉ 复制事项
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      const task = ctx.task!
+                      setCtx(null)
+                      props.onDeleteTask(task)
+                    }}
+                  >
+                    ✕ 删除事项
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      const iso = ctx.iso!
+                      const minute = ctx.minute ?? 9 * 60
+                      setCtx(null)
+                      props.onAddAt(iso, toTime(minute), toTime(minute + DEFAULT_DURATION))
+                    }}
+                  >
+                    ＋ 在此新增
+                  </button>
+                  <button
+                    onClick={() => {
+                      const iso = ctx.iso!
+                      const minute = ctx.minute ?? 9 * 60
+                      setCtx(null)
+                      props.onPaste(iso, toTime(minute))
+                    }}
+                  >
+                    ⧉ 粘贴事项
+                  </button>
+                </>
+              )}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   )
 }

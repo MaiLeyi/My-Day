@@ -1,11 +1,14 @@
-import { useEffect, useState } from 'react'
-import type { Settings, StorageInfo, Theme, View } from '../types'
+import { useEffect, useMemo, useState } from 'react'
+import type { Folder, Project, Settings, StorageInfo, Task, Theme, View } from '../types'
 import { api } from '../api'
-import { download, today } from '../utils'
+import { download, projectColor, today } from '../utils'
 import Modal from './Modal'
 
 interface Props {
   settings: Settings
+  tasks: Task[]
+  projects: Project[]
+  folders: Folder[]
   onClose: () => void
   onSaved: (settings: Settings) => void
   onPreviewTheme: (theme: Theme | null) => void
@@ -15,14 +18,17 @@ interface Props {
 
 const MODELS = ['gpt-4o', 'gpt-4o-mini', 'deepseek-chat', 'qwen-plus', 'claude-3.5-sonnet']
 
-type Tab = 'ai' | 'general' | 'storage' | 'backup'
+type Tab = 'ai' | 'general' | 'storage' | 'export' | 'backup'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'ai', label: 'AI 配置' },
   { key: 'general', label: '通用' },
   { key: 'storage', label: '数据存储' },
+  { key: 'export', label: '导出事项' },
   { key: 'backup', label: '备份与迁移' },
 ]
+
+const UNASSIGNED = ''
 
 export default function SettingsModal(props: Props) {
   const [form, setForm] = useState<Settings>(() => ({
@@ -39,6 +45,63 @@ export default function SettingsModal(props: Props) {
   const [backingUp, setBackingUp] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ projects: number; folders: number; tasks: number; files: number } | null>(null)
+
+  // ---- 导出事项 ----
+  const projectIds = useMemo(() => {
+    const ids = props.projects.map((p) => p.id)
+    if (props.tasks.some((t) => !t.projectId)) ids.push(UNASSIGNED)
+    return ids
+  }, [props.projects, props.tasks])
+  const [pickedProjects, setPickedProjects] = useState<Set<string>>(() => new Set(projectIds))
+  const [format, setFormat] = useState<'json' | 'csv'>('json')
+  const [pickedTasks, setPickedTasks] = useState<Set<string> | null>(null)
+  const [exporting, setExporting] = useState(false)
+
+  const exportCandidates = useMemo(
+    () => props.tasks.filter((t) => pickedProjects.has(t.projectId)),
+    [props.tasks, pickedProjects],
+  )
+
+  const checkedTasks = useMemo(() => {
+    if (pickedTasks) return new Set([...pickedTasks].filter((id) => exportCandidates.some((t) => t.id === id)))
+    return new Set(exportCandidates.map((t) => t.id))
+  }, [pickedTasks, exportCandidates])
+
+  const allProjectsChecked = projectIds.length > 0 && pickedProjects.size === projectIds.length
+  const allTasksChecked = exportCandidates.length > 0 && checkedTasks.size === exportCandidates.length
+
+  const toggleExportProject = (id: string, on: boolean) => {
+    const next = new Set(pickedProjects)
+    if (on) next.add(id)
+    else next.delete(id)
+    setPickedProjects(next)
+    setPickedTasks(null)
+  }
+
+  const toggleExportTask = (id: string) => {
+    const next = new Set(checkedTasks)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setPickedTasks(next)
+  }
+
+  const doExport = async () => {
+    const ids = exportCandidates.filter((t) => checkedTasks.has(t.id)).map((t) => t.id)
+    if (!ids.length) {
+      props.onToast('先勾选要导出的事项')
+      return
+    }
+    setExporting(true)
+    try {
+      const blob = await api.exportTasks(ids, format)
+      download(blob, `事项导出_${today()}.${format === 'csv' ? 'csv' : 'json'}`)
+      props.onToast(`已导出 ${ids.length} 条`)
+    } catch (err) {
+      props.onToast((err as Error).message)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const desktop = typeof window !== 'undefined' && !!window.taskflow
 
@@ -310,6 +373,89 @@ export default function SettingsModal(props: Props) {
                   更改数据目录会把现有数据库与附件复制到新位置，原目录数据保留。安装位置不提供修改。
                 </div>
               )}
+            </>
+          )}
+
+          {tab === 'export' && (
+            <>
+              <div className="exp-hint">默认导出全部事项，可按项目多选缩小范围。</div>
+              <div className="exp-projects">
+                <label className="exp-proj">
+                  <input
+                    type="checkbox"
+                    checked={allProjectsChecked}
+                    onChange={(e) => {
+                      setPickedProjects(e.target.checked ? new Set(projectIds) : new Set())
+                      setPickedTasks(null)
+                    }}
+                  />
+                  <span>全部项目</span>
+                </label>
+                {props.projects.map((p) => (
+                  <label className="exp-proj" key={p.id}>
+                    <input
+                      type="checkbox"
+                      checked={pickedProjects.has(p.id)}
+                      onChange={(e) => toggleExportProject(p.id, e.target.checked)}
+                    />
+                    <i className="exp-dot" style={{ background: projectColor(p.shade) }} />
+                    <span>{p.name}</span>
+                  </label>
+                ))}
+                {projectIds.includes(UNASSIGNED) && (
+                  <label className="exp-proj">
+                    <input
+                      type="checkbox"
+                      checked={pickedProjects.has(UNASSIGNED)}
+                      onChange={(e) => toggleExportProject(UNASSIGNED, e.target.checked)}
+                    />
+                    <span>未分组</span>
+                  </label>
+                )}
+              </div>
+              <div className="exp-bar">
+                <label className="exp-all">
+                  <input
+                    type="checkbox"
+                    checked={allTasksChecked}
+                    onChange={(e) =>
+                      setPickedTasks(e.target.checked ? new Set(exportCandidates.map((t) => t.id)) : new Set())
+                    }
+                  />
+                  全选
+                </label>
+                <select id="expFmt" value={format} onChange={(e) => setFormat(e.target.value as 'json' | 'csv')}>
+                  <option value="json">JSON</option>
+                  <option value="csv">Excel（CSV）</option>
+                </select>
+              </div>
+              <div className="exp-list">
+                {exportCandidates.map((t) => {
+                  const project = props.projects.find((p) => p.id === t.projectId)
+                  const folder = props.folders.find((f) => f.id === t.folderId)
+                  return (
+                    <label className="exp-item" key={t.id}>
+                      <input
+                        type="checkbox"
+                        checked={checkedTasks.has(t.id)}
+                        onChange={() => toggleExportTask(t.id)}
+                      />
+                      <span style={{ flex: 1 }}>{t.title}</span>
+                      <span className="meta">
+                        {project?.name || '未分组'}
+                        {folder ? ' · ' + folder.name : ''}
+                        {t.planDate ? ' · ' + t.planDate : ''}
+                      </span>
+                    </label>
+                  )
+                })}
+                {exportCandidates.length === 0 && <div className="ai-empty">当前选择下没有可导出的事项</div>}
+              </div>
+              <div className="exp-actions">
+                <button className="btn btn-pri" onClick={doExport} disabled={exporting}>
+                  {exporting ? '导出中…' : `导出 ${checkedTasks.size} 条`}
+                </button>
+              </div>
             </>
           )}
 

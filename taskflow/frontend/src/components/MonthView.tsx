@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { Project, Task } from '../types'
-import { getDragPayload, monthCells, projectColor, setDragPayload } from '../utils'
+import { getDragPayload, markConflicts, monthCells, projectColor, setDragPayload } from '../utils'
 
 interface Props {
   cursor: Date
@@ -15,15 +15,22 @@ interface Props {
   onToday: () => void
   onSelectDay: (iso: string) => void
   onAddDay: (iso: string) => void
+  onOpenDay: (iso: string) => void
   onOpen: (id: string) => void
   onSchedule: (taskId: string, iso: string) => void
   onEdit: (id: string) => void
   onToggleStatus: (task: Task) => void
   onDeleteTask: (task: Task) => void
+  onCopyTask: (task: Task) => void
+  onPaste: (iso: string, start?: string) => void
 }
 
-export default function MonthView(props: Props) {
-  const [hint, setHint] = useState('')
+function toMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number)
+  return (Number.isFinite(h) ? h : 0) * 60 + (Number.isFinite(m) ? m : 0)
+}
+
+export default function MonthView(props: Props) {  const [hint, setHint] = useState('')
   const [menu, setMenu] = useState<{ x: number; y: number; task?: Task; iso?: string } | null>(null)
   const cells = monthCells(props.cursor)
   const shadeOf = (pid: string) => props.projects.find((p) => p.id === pid)?.shade ?? 0
@@ -88,8 +95,19 @@ export default function MonthView(props: Props) {
       </div>
       <div className="cal-grid">
         {cells.map((cell) => {
-          const planned = props.tasks.filter((t) => t.planDate === cell.iso)
-          const dueItems = props.tasks.filter((t) => t.dueDate === cell.iso && t.planDate !== cell.iso)
+          // 月视图只展示已安排具体时间的事项，未安排事项留给清单 / 日程处理
+          const planned = props.tasks.filter((t) => t.planDate === cell.iso && !!t.start)
+          const conflictIds = new Set(
+            markConflicts(
+              planned.map((t) => {
+                const start = toMinutes(t.start)
+                const end = t.end ? toMinutes(t.end) : start + 30
+                return { task: t, start, end: end > start ? end : start + 30 }
+              }),
+            )
+              .filter((item) => item.conflict)
+              .map((item) => item.task.id),
+          )
           return (
             <div
               key={cell.iso}
@@ -115,7 +133,7 @@ export default function MonthView(props: Props) {
                 if (payload?.type === 'task') props.onSchedule(payload.id, cell.iso)
               }}
               onClick={(e) => {
-                if ((e.target as HTMLElement).closest('.tcard,.day-add')) return
+                if ((e.target as HTMLElement).closest('.tcard')) return
                 props.onSelectDay(cell.iso)
               }}
               onContextMenu={(e) => {
@@ -124,17 +142,6 @@ export default function MonthView(props: Props) {
               }}
             >
               <div className="dnum">{cell.day}</div>
-              <button
-                className="day-add"
-                title="在此日新增"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  props.onSelectDay(cell.iso)
-                  props.onAddDay(cell.iso)
-                }}
-              >
-                ＋
-              </button>
               <div className="cards">
                 {planned.map((t) => (
                   <div
@@ -145,7 +152,7 @@ export default function MonthView(props: Props) {
                       (t.status === 'done' ? ' done' : '') +
                       (props.focusId === t.id ? ' flash' : '')
                     }
-                    style={{ borderLeftColor: projectColor(shadeOf(t.projectId)) }}
+                    style={{ ['--ev-c' as string]: projectColor(shadeOf(t.projectId)) }}
                     draggable
                     onDragStart={(e) => {
                       setDragPayload({ type: 'task', id: t.id })
@@ -180,7 +187,10 @@ export default function MonthView(props: Props) {
                       >
                         {t.status === 'done' ? '✓' : ''}
                       </span>
-                      <span className="ctitle">{t.title}</span>
+                      <span className="ctitle">
+                        {conflictIds.has(t.id) && <i className="tl-conflict-dot" title="与其它事项时间冲突" />}
+                        {t.title}
+                      </span>
                       {t.start && (
                         <span className="time">
                           {t.start}
@@ -188,22 +198,6 @@ export default function MonthView(props: Props) {
                         </span>
                       )}
                     </div>
-                  </div>
-                ))}
-                {dueItems.map((t) => (
-                  <div
-                    key={'due-' + t.id}
-                    data-task-id={t.id}
-                    className={'tcard due' + (props.focusId === t.id ? ' flash' : '')}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      props.onOpen(t.id)
-                    }}
-                    onContextMenu={(e) => openMenu(e, { task: t })}
-                    role="button"
-                    tabIndex={0}
-                  >
-                    <div className="ctitle">⏰ {t.title}</div>
                   </div>
                 ))}
               </div>
@@ -234,6 +228,15 @@ export default function MonthView(props: Props) {
                   onClick={() => {
                     const t = menu.task!
                     setMenu(null)
+                    props.onCopyTask(t)
+                  }}
+                >
+                  ⧉ 复制事项
+                </button>
+                <button
+                  onClick={() => {
+                    const t = menu.task!
+                    setMenu(null)
                     props.onToggleStatus(t)
                   }}
                 >
@@ -251,16 +254,35 @@ export default function MonthView(props: Props) {
                 </button>
               </>
             ) : (
-              <button
-                onClick={() => {
-                  const iso = menu.iso!
-                  setMenu(null)
-                  props.onSelectDay(iso)
-                  props.onAddDay(iso)
-                }}
-              >
-                ＋ 在此日新增
-              </button>
+              <>
+                <button
+                  onClick={() => {
+                    const iso = menu.iso!
+                    setMenu(null)
+                    props.onAddDay(iso)
+                  }}
+                >
+                  ＋ 在此日新增
+                </button>
+                <button
+                  onClick={() => {
+                    const iso = menu.iso!
+                    setMenu(null)
+                    props.onOpenDay(iso)
+                  }}
+                >
+                  📅 前往日程
+                </button>
+                <button
+                  onClick={() => {
+                    const iso = menu.iso!
+                    setMenu(null)
+                    props.onPaste(iso)
+                  }}
+                >
+                  ⧉ 粘贴事项
+                </button>
+              </>
             )}
           </div>,
           document.body,

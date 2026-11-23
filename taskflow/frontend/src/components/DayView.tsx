@@ -4,6 +4,7 @@ import type {
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
 } from 'react'
+import { createPortal } from 'react-dom'
 import type { Folder, Project, Task } from '../types'
 import { PRIORITY_LABEL, fmt, getDragPayload, markConflicts, parseDate, projectColor, setDragPayload, today } from '../utils'
 import DateField from './DateField'
@@ -25,11 +26,16 @@ interface Props {
   onDropTask: (sourceId: string, targetId: string) => void
   onToggleStatus: (task: Task) => void
   onDeleteTask: (task: Task) => void
+  onCopyTask: (task: Task) => void
+  onPaste: (iso: string, start?: string) => void
 }
 
-const HOUR_HEIGHT = 46
-const SNAP = 15
+/** 与本周视图保持一致：半小时占 42px，事项最小单位为半小时。 */
+const HOUR_HEIGHT = 84
+const SNAP = 30
+const MIN_DURATION = 30
 const DEFAULT_DURATION = 30
+const MIN_EVENT_HEIGHT = (MIN_DURATION / 60) * HOUR_HEIGHT
 
 function toMinutes(time: string): number {
   const [h, m] = time.split(':').map(Number)
@@ -77,6 +83,13 @@ interface SelectState {
   dragging: boolean
 }
 
+interface ContextState {
+  x: number
+  y: number
+  task?: Task
+  minute?: number
+}
+
 export default function DayView(props: Props) {
   const [drag, setDrag] = useState<DragState | null>(null)
   const dragRef = useRef<DragState | null>(null)
@@ -86,6 +99,7 @@ export default function DayView(props: Props) {
   const selectCleanupRef = useRef<(() => void) | null>(null)
   const innerRef = useRef<HTMLDivElement>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
+  const [ctx, setCtx] = useState<ContextState | null>(null)
 
   const dayTasks = props.tasks.filter(
     (t) => t.planDate === props.date || (t.dueDate === props.date && t.planDate !== props.date),
@@ -114,6 +128,23 @@ export default function DayView(props: Props) {
     const el = document.querySelector<HTMLElement>(`[data-task-id="${props.focusId}"]`)
     el?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' })
   }, [props.focusId, props.tasks])
+
+  // 右键菜单：点击空白、滚动或 Esc 关闭
+  useEffect(() => {
+    if (!ctx) return
+    const close = () => setCtx(null)
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCtx(null)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('scroll', close, true)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('mousedown', close)
+      window.removeEventListener('scroll', close, true)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [ctx])
 
   const beginDrag = (event: ReactPointerEvent, item: TimedItem, mode: DragState['mode']) => {
     if (event.button !== 0) return
@@ -144,11 +175,11 @@ export default function DayView(props: Props) {
         start = clamp(current.start + delta, 0, 24 * 60 - duration)
         end = start + duration
       } else if (current.mode === 'start') {
-        start = clamp(current.start + delta, 0, current.end - SNAP)
+        start = clamp(current.start + delta, 0, current.end - MIN_DURATION)
         end = current.end
       } else {
         start = current.start
-        end = clamp(current.end + delta, current.start + SNAP, 24 * 60)
+        end = clamp(current.end + delta, current.start + MIN_DURATION, 24 * 60)
       }
       const next: DragState = {
         ...current,
@@ -275,6 +306,29 @@ export default function DayView(props: Props) {
     window.addEventListener('mouseup', finish)
   }
 
+  const openContext = (event: ReactMouseEvent, task: Task) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setCtx({
+      x: Math.min(event.clientX, window.innerWidth - 170),
+      y: Math.min(event.clientY, window.innerHeight - 110),
+      task,
+    })
+  }
+
+  /** 在时间轴空白处右键：可在当前位置新增或粘贴事项。 */
+  const openEmptyContext = (event: ReactMouseEvent) => {
+    if ((event.target as HTMLElement).closest('.tl-event')) return
+    event.preventDefault()
+    const rect = innerRef.current?.getBoundingClientRect()
+    const minute = rect ? snapMinutes(event.clientY - rect.top) : 9 * 60
+    setCtx({
+      x: Math.min(event.clientX, window.innerWidth - 190),
+      y: Math.min(event.clientY, window.innerHeight - 130),
+      minute,
+    })
+  }
+
   const hours = Array.from({ length: 24 }, (_, i) => i)
 
   return (
@@ -321,6 +375,7 @@ export default function DayView(props: Props) {
                   onDragStart={(e) => beginTaskDrag(e, t.id)}
                   onDragEnd={() => setDragPayload(null)}
                   onClick={() => props.onOpen(t.id)}
+                  onContextMenu={(e) => openContext(e, t)}
                   title="拖到右侧时间轴安排时间"
                 >
                   <div className="tl-chip-main">
@@ -342,16 +397,6 @@ export default function DayView(props: Props) {
                     >
                       {t.status === 'done' ? '✓' : ''}
                     </button>
-                    <button
-                      className="tl-chip-del"
-                      title="删除事项"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        props.onDeleteTask(t)
-                      }}
-                    >
-                      ✕
-                    </button>
                   </span>
                 </div>
               )
@@ -371,6 +416,7 @@ export default function DayView(props: Props) {
             onDrop={onTimelineDrop}
             onDoubleClick={addFromTimeline}
             onMouseDown={beginSelect}
+            onContextMenu={openEmptyContext}
           >
             {hours.map((h) => (
               <div className="tl-hour" key={h} style={{ top: h * HOUR_HEIGHT }}>
@@ -406,8 +452,7 @@ export default function DayView(props: Props) {
               const start = preview ? preview.previewStart : item.start
               const end = preview ? preview.previewEnd : item.end
               const top = (start / 60) * HOUR_HEIGHT
-              const height = Math.max(24, ((end - start) / 60) * HOUR_HEIGHT)
-              const size = height < 36 ? ' compact' : height < 56 ? ' mid' : ''
+              const height = Math.max(MIN_EVENT_HEIGHT, ((end - start) / 60) * HOUR_HEIGHT)
               const project = props.projects.find((p) => p.id === item.task.projectId)
               return (
                 <div
@@ -418,51 +463,45 @@ export default function DayView(props: Props) {
                     (item.task.status === 'done' ? ' done' : '') +
                     (item.conflict ? ' conflict' : '') +
                     (preview ? ' dragging' : '') +
-                    (props.focusId === item.task.id ? ' flash' : '') +
-                    size
+                    (props.focusId === item.task.id ? ' flash' : '')
                   }
-                  style={{ top, height, left: 2, right: 2, borderLeftColor: projectColor(project?.shade) }}
+                  style={{
+                    top,
+                    height,
+                    left: 2,
+                    right: 2,
+                    ['--ev-c' as string]: projectColor(project?.shade),
+                  }}
                   onPointerDown={(e) => beginDrag(e, item, 'move')}
                   onClick={(e) => e.stopPropagation()}
+                  onContextMenu={(e) => openContext(e, item.task)}
                 >
                   <div
                     className="tl-handle top"
                     onPointerDown={(e) => beginDrag(e, item, 'start')}
                     title="拖动调整开始时间"
                   />
-                  <div className="tl-event-head">
-                    <button
-                      className={'tl-check small ' + item.task.status}
-                      title={item.task.status === 'done' ? '标记为未处理' : '标记为已处理'}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        props.onToggleStatus(item.task)
-                      }}
-                    >
-                      {item.task.status === 'done' ? '✓' : ''}
-                    </button>
-                    <span className="tl-event-title">{item.task.title}</span>
-                    {item.conflict && (
-                      <span className="tl-event-flag" title="与其它事项时间冲突">
-                        冲突
+                  <div className="tl-event-body">
+                    <div className="tl-event-head">
+                      <button
+                        className={'tl-check small ' + item.task.status}
+                        title={item.task.status === 'done' ? '标记为未处理' : '标记为已处理'}
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          props.onToggleStatus(item.task)
+                        }}
+                      >
+                        {item.task.status === 'done' ? '✓' : ''}
+                      </button>
+                      <span className="tl-event-title">
+                        {item.conflict && <i className="tl-conflict-dot" title="与其它事项时间冲突" />}
+                        {item.task.title}
                       </span>
-                    )}
-                    <span className="tl-event-time">
+                    </div>
+                    <div className="tl-event-time">
                       {toTime(start)} – {toTime(end)}
-                    </span>
-                  </div>
-                  <div className="tl-actions" onPointerDown={(e) => e.stopPropagation()}>
-                    <button
-                      className="tact-mini danger"
-                      title="删除事项"
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        props.onDeleteTask(item.task)
-                      }}
-                    >
-                      ✕
-                    </button>
+                    </div>
                   </div>
                   <div
                     className="tl-handle bottom"
@@ -475,6 +514,65 @@ export default function DayView(props: Props) {
           </div>
         </div>
       </div>
+
+      {ctx &&
+        createPortal(
+          <>
+            <div className="ctx-backdrop" onMouseDown={() => setCtx(null)} />
+            <div
+              className="ctx-menu"
+              style={{ left: ctx.x, top: ctx.y }}
+              onMouseDown={(e) => e.stopPropagation()}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              {ctx.task ? (
+                <>
+                  <button
+                    onClick={() => {
+                      const task = ctx.task!
+                      setCtx(null)
+                      props.onCopyTask(task)
+                    }}
+                  >
+                    ⧉ 复制事项
+                  </button>
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      const task = ctx.task!
+                      setCtx(null)
+                      props.onDeleteTask(task)
+                    }}
+                  >
+                    ✕ 删除事项
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={() => {
+                      const minute = ctx.minute ?? 9 * 60
+                      setCtx(null)
+                      props.onAddAt(props.date, toTime(minute), toTime(minute + DEFAULT_DURATION))
+                    }}
+                  >
+                    ＋ 在此新增
+                  </button>
+                  <button
+                    onClick={() => {
+                      const minute = ctx.minute ?? 9 * 60
+                      setCtx(null)
+                      props.onPaste(props.date, toTime(minute))
+                    }}
+                  >
+                    ⧉ 粘贴事项
+                  </button>
+                </>
+              )}
+            </div>
+          </>,
+          document.body,
+        )}
     </div>
   )
 }

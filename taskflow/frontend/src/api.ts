@@ -98,7 +98,16 @@ export const api = {
       ...json({ ids, format }),
       headers: { 'Content-Type': 'application/json' },
     })
-    if (!resp.ok) throw new Error('导出失败')
+    if (!resp.ok) {
+      let message = '导出失败'
+      try {
+        const body = await resp.json()
+        message = body.detail || body.message || message
+      } catch {
+        /* ignore */
+      }
+      throw new Error(message)
+    }
     return resp.blob()
   },
 
