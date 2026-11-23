@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { Settings, StorageInfo, Theme, View } from '../types'
 import { api } from '../api'
+import { download, today } from '../utils'
 import Modal from './Modal'
 
 interface Props {
@@ -8,17 +9,19 @@ interface Props {
   onClose: () => void
   onSaved: (settings: Settings) => void
   onPreviewTheme: (theme: Theme | null) => void
+  onImported?: () => void
   onToast: (message: string) => void
 }
 
 const MODELS = ['gpt-4o', 'gpt-4o-mini', 'deepseek-chat', 'qwen-plus', 'claude-3.5-sonnet']
 
-type Tab = 'ai' | 'general' | 'storage'
+type Tab = 'ai' | 'general' | 'storage' | 'backup'
 
 const TABS: { key: Tab; label: string }[] = [
   { key: 'ai', label: 'AI 配置' },
   { key: 'general', label: '通用' },
   { key: 'storage', label: '数据存储' },
+  { key: 'backup', label: '备份与迁移' },
 ]
 
 export default function SettingsModal(props: Props) {
@@ -33,6 +36,9 @@ export default function SettingsModal(props: Props) {
   const [storage, setStorage] = useState<StorageInfo | null>(null)
   const [appDir, setAppDir] = useState('')
   const [migrating, setMigrating] = useState(false)
+  const [backingUp, setBackingUp] = useState(false)
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{ projects: number; folders: number; tasks: number; files: number } | null>(null)
 
   const desktop = typeof window !== 'undefined' && !!window.taskflow
 
@@ -72,6 +78,36 @@ export default function SettingsModal(props: Props) {
       props.onToast((err as Error).message)
     } finally {
       setMigrating(false)
+    }
+  }
+
+  const exportBackup = async () => {
+    setBackingUp(true)
+    try {
+      const blob = await api.backup()
+      download(blob, `任务流备份_${today()}.zip`)
+      props.onToast('备份已导出')
+    } catch (err) {
+      props.onToast((err as Error).message)
+    } finally {
+      setBackingUp(false)
+    }
+  }
+
+  const importBackup = async (files: FileList | null) => {
+    const file = files?.[0]
+    if (!file) return
+    setImporting(true)
+    setImportResult(null)
+    try {
+      const result = await api.importBackup(file)
+      setImportResult(result)
+      props.onImported?.()
+      props.onToast(`已导入 ${result.tasks} 个事项`)
+    } catch (err) {
+      props.onToast((err as Error).message)
+    } finally {
+      setImporting(false)
     }
   }
 
@@ -274,6 +310,41 @@ export default function SettingsModal(props: Props) {
                   更改数据目录会把现有数据库与附件复制到新位置，原目录数据保留。安装位置不提供修改。
                 </div>
               )}
+            </>
+          )}
+
+          {tab === 'backup' && (
+            <>
+              <div className="place-hint">
+                导出会把全部项目、分组、事项和附件打包为 zip；导入只新增内容，不会覆盖或删除现有数据，适合备份与换机迁移。
+              </div>
+              <div className="backup-actions">
+                <button className="btn btn-ghost" onClick={exportBackup} disabled={backingUp || importing}>
+                  {backingUp ? '打包中…' : '⇩ 导出完整备份'}
+                </button>
+                <label className={'btn btn-ghost backup-import' + (importing ? ' disabled' : '')}>
+                  {importing ? '导入中…' : '⇧ 导入备份'}
+                  <input
+                    type="file"
+                    accept=".zip,application/zip"
+                    hidden
+                    disabled={importing}
+                    onChange={(e) => {
+                      importBackup(e.target.files)
+                      e.target.value = ''
+                    }}
+                  />
+                </label>
+              </div>
+              {importResult && (
+                <div className="import-result">
+                  已导入：项目 {importResult.projects} 个 · 分组 {importResult.folders} 个 · 事项{' '}
+                  {importResult.tasks} 个 · 附件 {importResult.files} 个
+                </div>
+              )}
+              <div className="place-hint" style={{ marginTop: 10 }}>
+                导入的备份不会带入 AI 配置；重复导入会生成新的项目与事项，请按需清理。
+              </div>
             </>
           )}
         </div>

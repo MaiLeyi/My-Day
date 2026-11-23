@@ -17,6 +17,7 @@ const FRONTEND_DIST = PACKAGED
   ? path.join(RESOURCES, 'frontend')
   : path.join(ROOT, 'frontend', 'dist')
 const PRELOAD = path.join(__dirname, 'preload.cjs')
+const ICON_PNG = path.join(__dirname, 'icon.png')
 // 数据目录：默认放用户数据目录，可在设置中修改。
 // 配置文件固定放在 userData（不随数据目录变化），作为定位数据目录的唯一锚点。
 const CONFIG_FILE = path.join(app.getPath('userData'), 'config.json')
@@ -59,12 +60,15 @@ function indexUrl() {
 
 function createWindow() {
   log('[win] create url=', indexUrl())
-  mainWindow = new BrowserWindow({
+  const winOptions = {
     width: 1280, height: 820, minWidth: 960, minHeight: 620,
-    backgroundColor: '#f5f5f6', show: false,
+    backgroundColor: '#f5f5f6', show: false, autoHideMenuBar: true,
     title: '任务流',
     webPreferences: { preload: PRELOAD, contextIsolation: true, nodeIntegration: false, sandbox: false, webSecurity: true },
-  })
+  }
+  if (fs.existsSync(ICON_PNG)) winOptions.icon = ICON_PNG
+  mainWindow = new BrowserWindow(winOptions)
+  mainWindow.setMenuBarVisibility(false)
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//i.test(url)) { shell.openExternal(url); return { action: 'deny' } }
     return { action: 'allow' }
@@ -332,6 +336,8 @@ if (!gotLock) {
     if (mainWindow) { mainWindow.show(); mainWindow.focus() }
   })
   app.whenReady().then(async () => {
+    // Windows / Linux 隐藏默认的 File / Edit / View / Window / Help 菜单
+    if (!IS_MAC) Menu.setApplicationMenu(null)
     setupMacMenu()
     // 开发期 Dock 图标默认是 Electron，换成应用图标
     if (IS_MAC && !PACKAGED && app.dock) {

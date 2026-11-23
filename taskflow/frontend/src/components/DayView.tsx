@@ -5,7 +5,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from 'react'
 import type { Folder, Project, Task } from '../types'
-import { PRIORITY_LABEL, fmt, getDragPayload, markConflicts, parseDate, setDragPayload, today } from '../utils'
+import { PRIORITY_LABEL, fmt, getDragPayload, markConflicts, parseDate, projectColor, setDragPayload, today } from '../utils'
 import DateField from './DateField'
 
 interface Props {
@@ -17,6 +17,7 @@ interface Props {
   batchMode: boolean
   selected: Set<string>
   onDateChange: (iso: string) => void
+  onAddDay: (iso: string) => void
   onAddAt: (iso: string, start: string, end: string) => void
   onScheduleRange: (taskId: string, iso: string, start: string, end: string) => void
   onOpen: (id: string) => void
@@ -184,6 +185,19 @@ export default function DayView(props: Props) {
     window.addEventListener('pointerup', finish)
   }
 
+  /** 拖到左侧未安排区 / 跨天拖动时写入统一拖拽载荷。 */
+  const beginTaskDrag = (event: ReactDragEvent, id: string) => {
+    setDragPayload({ type: 'task', id })
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move'
+      try {
+        event.dataTransfer.setData('text/plain', id)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   const onTimelineDrop = (event: ReactDragEvent) => {
     event.preventDefault()
     const payload = getDragPayload()
@@ -281,10 +295,7 @@ export default function DayView(props: Props) {
         <span className="day-count">{timed.length} 项已排时间 · {untimed.length} 项待安排</span>
         <button
           className="btn btn-ghost day-add-btn"
-          onClick={() => {
-            const hour = new Date().getHours()
-            props.onAddAt(props.date, toTime(hour * 60), toTime(hour * 60 + DEFAULT_DURATION))
-          }}
+          onClick={() => props.onAddDay(props.date)}
         >
           ＋ 新增
         </button>
@@ -307,7 +318,7 @@ export default function DayView(props: Props) {
                     'tl-chip pri-' + (t.priority || 'none') + (props.focusId === t.id ? ' flash' : '')
                   }
                   draggable={!props.batchMode}
-                  onDragStart={() => setDragPayload({ type: 'task', id: t.id })}
+                  onDragStart={(e) => beginTaskDrag(e, t.id)}
                   onDragEnd={() => setDragPayload(null)}
                   onClick={() => props.onOpen(t.id)}
                   title="拖到右侧时间轴安排时间"
@@ -320,7 +331,28 @@ export default function DayView(props: Props) {
                       {t.priority && <span>· {PRIORITY_LABEL[t.priority]}优先级</span>}
                     </div>
                   </div>
-                  <span className="tl-chip-drag">⠿</span>
+                  <span className="tl-chip-actions">
+                    <button
+                      className={'tl-check small ' + t.status}
+                      title={t.status === 'done' ? '标记为未处理' : '标记为已处理'}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        props.onToggleStatus(t)
+                      }}
+                    >
+                      {t.status === 'done' ? '✓' : ''}
+                    </button>
+                    <button
+                      className="tl-chip-del"
+                      title="删除事项"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        props.onDeleteTask(t)
+                      }}
+                    >
+                      ✕
+                    </button>
+                  </span>
                 </div>
               )
             })}
@@ -382,15 +414,14 @@ export default function DayView(props: Props) {
                   key={item.task.id}
                   data-task-id={item.task.id}
                   className={
-                    'tl-event g' +
-                    (project?.shade ?? 0) +
+                    'tl-event' +
                     (item.task.status === 'done' ? ' done' : '') +
                     (item.conflict ? ' conflict' : '') +
                     (preview ? ' dragging' : '') +
                     (props.focusId === item.task.id ? ' flash' : '') +
                     size
                   }
-                  style={{ top, height, left: 2, right: 2 }}
+                  style={{ top, height, left: 2, right: 2, borderLeftColor: projectColor(project?.shade) }}
                   onPointerDown={(e) => beginDrag(e, item, 'move')}
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -400,6 +431,17 @@ export default function DayView(props: Props) {
                     title="拖动调整开始时间"
                   />
                   <div className="tl-event-head">
+                    <button
+                      className={'tl-check small ' + item.task.status}
+                      title={item.task.status === 'done' ? '标记为未处理' : '标记为已处理'}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        props.onToggleStatus(item.task)
+                      }}
+                    >
+                      {item.task.status === 'done' ? '✓' : ''}
+                    </button>
                     <span className="tl-event-title">{item.task.title}</span>
                     {item.conflict && (
                       <span className="tl-event-flag" title="与其它事项时间冲突">
@@ -411,16 +453,6 @@ export default function DayView(props: Props) {
                     </span>
                   </div>
                   <div className="tl-actions" onPointerDown={(e) => e.stopPropagation()}>
-                    <button
-                      className="tact-mini"
-                      title={item.task.status === 'done' ? '标记为未处理' : '标记为已处理'}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        props.onToggleStatus(item.task)
-                      }}
-                    >
-                      {item.task.status === 'done' ? '↺' : '✓'}
-                    </button>
                     <button
                       className="tact-mini danger"
                       title="删除事项"

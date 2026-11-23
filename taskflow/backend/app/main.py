@@ -43,6 +43,7 @@ init_db()
 store.gc_orphan_files()
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+MAX_BACKUP_BYTES = 1024 * 1024 * 1024
 
 
 @app.get("/api/health")
@@ -201,6 +202,28 @@ def get_settings() -> dict:
 @app.put("/api/settings")
 def put_settings(payload: SettingsPayload) -> dict:
     return store.save_settings(payload)
+
+
+@app.get("/api/backup")
+def download_backup() -> Response:
+    content = store.export_backup()
+    filename = f"taskflow_backup_{date.today().isoformat()}.zip"
+    return Response(
+        content=content,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/import")
+async def import_backup(file: UploadFile = File(...)) -> dict:
+    content = await file.read()
+    if len(content) > MAX_BACKUP_BYTES:
+        raise HTTPException(413, "备份文件过大")
+    try:
+        return store.import_backup(content)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
 
 
 @app.post("/api/ai/test")

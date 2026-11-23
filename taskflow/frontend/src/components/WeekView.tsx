@@ -4,7 +4,7 @@ import type {
   MouseEvent as ReactMouseEvent,
 } from 'react'
 import type { Project, Task } from '../types'
-import { STATUS, getDragPayload, markConflicts, setDragPayload, weekDays } from '../utils'
+import { STATUS, getDragPayload, markConflicts, projectColor, setDragPayload, weekDays } from '../utils'
 
 interface Props {
   offset: number
@@ -72,6 +72,18 @@ export default function WeekView(props: Props) {
   }, [props.focusId, props.tasks])
 
   useEffect(() => () => selectCleanupRef.current?.(), [])
+
+  const beginTaskDrag = (event: ReactDragEvent, id: string) => {
+    setDragPayload({ type: 'task', id })
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move'
+      try {
+        event.dataTransfer.setData('text/plain', id)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
 
   /** 根据落点换算成 15 分钟对齐的开始时间。 */
   const minutesAt = (event: ReactDragEvent | ReactMouseEvent, duration: number): number => {
@@ -241,7 +253,7 @@ export default function WeekView(props: Props) {
                         (props.focusId === t.id ? ' flash' : '')
                       }
                       draggable
-                      onDragStart={() => setDragPayload({ type: 'task', id: t.id })}
+                      onDragStart={(e) => beginTaskDrag(e, t.id)}
                       onDragEnd={() => setDragPayload(null)}
                       onClick={() => props.onOpen(t.id)}
                       title={t.title}
@@ -329,39 +341,41 @@ export default function WeekView(props: Props) {
                         key={item.task.id}
                         data-task-id={item.task.id}
                         className={
-                          'tl-event wk-ev g' +
-                          (project?.shade ?? 0) +
+                          'tl-event wk-ev' +
                           (item.task.status === 'done' ? ' done' : '') +
                           (item.conflict ? ' conflict' : '') +
                           (props.focusId === item.task.id ? ' flash' : '') +
                           size
                         }
-                        style={{ top, height, left: 2, right: 2 }}
+                        style={{ top, height, left: 2, right: 2, borderLeftColor: projectColor(project?.shade) }}
                         draggable
-                        onDragStart={() => setDragPayload({ type: 'task', id: item.task.id })}
+                        onDragStart={(e) => beginTaskDrag(e, item.task.id)}
                         onDragEnd={() => setDragPayload(null)}
                         onClick={() => props.onOpen(item.task.id)}
                         title={`${item.task.title} ${toTime(item.start)}–${toTime(item.end)}${item.conflict ? '（时间冲突）' : ''}`}
                       >
-                        <div className="tl-event-title">
-                          {item.conflict && <i className="tl-conflict-dot" />}
-                          {item.task.title}
+                        <div className="tl-event-head">
+                          <button
+                            className={'tl-check small ' + item.task.status}
+                            title={item.task.status === 'done' ? '标记为未处理' : '标记为已处理'}
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              props.onToggleStatus(item.task)
+                            }}
+                          >
+                            {item.task.status === 'done' ? '✓' : ''}
+                          </button>
+                          <span className="tl-event-title">
+                            {item.conflict && <i className="tl-conflict-dot" />}
+                            {item.task.title}
+                          </span>
                         </div>
                         <div className="tl-event-time">
                           {toTime(item.start)} – {toTime(item.end)}
                         </div>
                         <div className="tl-event-status">{STATUS[item.task.status]}</div>
                         <div className="tl-actions" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            className="tact-mini"
-                            title={item.task.status === 'done' ? '标记为未处理' : '标记为已处理'}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              props.onToggleStatus(item.task)
-                            }}
-                          >
-                            {item.task.status === 'done' ? '↺' : '✓'}
-                          </button>
                           <button
                             className="tact-mini danger"
                             title="删除事项"

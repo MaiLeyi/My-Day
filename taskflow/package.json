@@ -53,6 +53,7 @@
       }
     ],
     "win": {
+      "icon": "electron/icon.png",
       "signAndEditExecutable": false,
       "target": [
         {

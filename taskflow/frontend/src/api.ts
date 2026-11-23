@@ -39,8 +39,8 @@ export const api = {
   bootstrap: () => request<Bootstrap>('/api/bootstrap'),
   storage: () => request<StorageInfo>('/api/storage'),
 
-  createProject: (name: string) => request<Project>('/api/projects', json({ name })),
-  updateProject: (id: string, patch: { name?: string; archived?: boolean }) =>
+  createProject: (name: string, shade = 0) => request<Project>('/api/projects', json({ name, shade })),
+  updateProject: (id: string, patch: { name?: string; shade?: number; archived?: boolean }) =>
     request<Project>(`/api/projects/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteProject: (id: string) => request<void>(`/api/projects/${id}`, { method: 'DELETE' }),
 
@@ -100,6 +100,29 @@ export const api = {
     })
     if (!resp.ok) throw new Error('导出失败')
     return resp.blob()
+  },
+
+  backup: async (): Promise<Blob> => {
+    const resp = await fetch('/api/backup')
+    if (!resp.ok) throw new Error('备份导出失败')
+    return resp.blob()
+  },
+
+  importBackup: async (file: File): Promise<{ projects: number; folders: number; tasks: number; files: number }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const resp = await fetch('/api/import', { method: 'POST', body: form })
+    if (!resp.ok) {
+      let message = `导入失败（${resp.status}）`
+      try {
+        const body = await resp.json()
+        message = body.detail || body.message || message
+      } catch {
+        /* ignore */
+      }
+      throw new Error(message)
+    }
+    return resp.json()
   },
 }
 

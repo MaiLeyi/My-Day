@@ -57,10 +57,12 @@ class TaskUpdate(BaseModel):
 
 class ProjectCreate(BaseModel):
     name: str
+    shade: int = 0
 
 
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
+    shade: Optional[int] = None
     archived: Optional[bool] = None
 
 

@@ -7,6 +7,7 @@ import io
 import re
 import secrets
 import sys
+import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -262,7 +263,7 @@ def create_project(payload: ProjectCreate) -> dict:
         pid = _uid("p")
         conn.execute(
             "INSERT INTO projects (id, name, shade, archived, sort, created_at) VALUES (?,?,?,?,?,?)",
-            (pid, payload.name.strip() or "未命名项目", sort % 3, 0, sort, now_iso()),
+            (pid, payload.name.strip() or "未命名项目", max(0, payload.shade), 0, sort, now_iso()),
         )
         conn.commit()
         row = conn.execute("SELECT * FROM projects WHERE id = ?", (pid,)).fetchone()
@@ -278,8 +279,12 @@ def update_project(pid: str, payload: ProjectUpdate) -> dict | None:
         if row is None:
             return None
         name = payload.name.strip() if payload.name is not None else row["name"]
+        shade = max(0, payload.shade) if payload.shade is not None else row["shade"]
         archived = int(payload.archived) if payload.archived is not None else row["archived"]
-        conn.execute("UPDATE projects SET name = ?, archived = ? WHERE id = ?", (name, archived, pid))
+        conn.execute(
+            "UPDATE projects SET name = ?, shade = ?, archived = ? WHERE id = ?",
+            (name, shade, archived, pid),
+        )
         conn.commit()
         return _project(conn.execute("SELECT * FROM projects WHERE id = ?", (pid,)).fetchone())
     finally:
@@ -530,3 +535,219 @@ def export_rows(ids: list[str], fmt: str) -> tuple[bytes, str, str]:
         writer.writerows(items)
         return ("\ufeff" + buf.getvalue()).encode("utf-8"), "text/csv; charset=utf-8", "csv"
     return json.dumps(items, ensure_ascii=False, indent=2).encode("utf-8"), "application/json; charset=utf-8", "json"
+
+
+# ---------- 备份 / 迁移 ----------
+def export_backup() -> bytes:
+    """打包全部项目、分组、事项及其引用附件为 zip。"""
+    conn = connect()
+    try:
+        projects = [dict(r) for r in conn.execute("SELECT * FROM projects ORDER BY sort, created_at")]
+        folders = [dict(r) for r in conn.execute("SELECT * FROM folders ORDER BY sort, created_at")]
+        tasks = [dict(r) for r in conn.execute("SELECT * FROM tasks ORDER BY sort, created_at")]
+        referenced: set[str] = set()
+        for t in tasks:
+            try:
+                images = json.loads(t.get("images") or "[]")
+                attachments = json.loads(t.get("attachments") or "[]")
+            except (json.JSONDecodeError, TypeError):
+                images, attachments = [], []
+            referenced |= _file_ids_of(images, attachments)
+        files = [
+            dict(r)
+            for r in conn.execute("SELECT * FROM files ORDER BY created_at")
+            if r["id"] in referenced
+        ]
+    finally:
+        conn.close()
+
+    settings = load_settings()
+    settings.pop("ai", None)
+    payload = {
+        "app": "taskflow",
+        "version": 1,
+        "exportedAt": now_iso(),
+        "projects": projects,
+        "folders": folders,
+        "tasks": tasks,
+        "files": files,
+        "settings": settings,
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("backup.json", json.dumps(payload, ensure_ascii=False))
+        for meta in files:
+            path = FILES_DIR / meta["stored_name"]
+            if path.exists():
+                zf.write(path, f"files/{meta['stored_name']}")
+    return buf.getvalue()
+
+
+def import_backup(content: bytes) -> dict:
+    """从备份 zip 中追加数据：只新增，不覆盖或删除现有内容。"""
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(content))
+    except zipfile.BadZipFile as exc:
+        raise ValueError("备份文件不是有效的 zip 压缩包") from exc
+
+    counts = {"projects": 0, "folders": 0, "tasks": 0, "files": 0}
+    with zf:
+        try:
+            raw = zf.read("backup.json")
+        except KeyError as exc:
+            raise ValueError("备份文件缺少 backup.json") from exc
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError("备份内容解析失败") from exc
+        if payload.get("app") != "taskflow":
+            raise ValueError("不是任务流导出的备份文件")
+
+        projects = payload.get("projects") or []
+        folders = payload.get("folders") or []
+        tasks = payload.get("tasks") or []
+        files = payload.get("files") or []
+
+        conn = connect()
+        try:
+            p_sort = conn.execute("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM projects").fetchone()["s"]
+            f_sort = conn.execute("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM folders").fetchone()["s"]
+            t_sort = conn.execute("SELECT COALESCE(MAX(sort), -1) + 1 AS s FROM tasks").fetchone()["s"]
+
+            pid_map: dict[str, str] = {}
+            for p in projects:
+                old_id = str(p.get("id") or "")
+                if not old_id:
+                    continue
+                nid = _uid("p")
+                pid_map[old_id] = nid
+                conn.execute(
+                    "INSERT INTO projects (id, name, shade, archived, sort, created_at) VALUES (?,?,?,?,?,?)",
+                    (
+                        nid,
+                        str(p.get("name") or "未命名项目"),
+                        max(0, int(p.get("shade") or 0)),
+                        int(bool(p.get("archived"))),
+                        p_sort,
+                        str(p.get("created_at") or now_iso()),
+                    ),
+                )
+                p_sort += 1
+                counts["projects"] += 1
+
+            fid_map: dict[str, str] = {}
+            for f in folders:
+                old_id = str(f.get("id") or "")
+                old_pid = str(f.get("project_id") or "")
+                if not old_id or old_pid not in pid_map:
+                    continue
+                nid = _uid("f")
+                fid_map[old_id] = nid
+                conn.execute(
+                    "INSERT INTO folders (id, project_id, name, sort, created_at) VALUES (?,?,?,?,?)",
+                    (
+                        nid,
+                        pid_map[old_pid],
+                        str(f.get("name") or "未命名分组"),
+                        f_sort,
+                        str(f.get("created_at") or now_iso()),
+                    ),
+                )
+                f_sort += 1
+                counts["folders"] += 1
+
+            file_map: dict[str, str] = {}
+            for meta in files:
+                old_id = str(meta.get("id") or "")
+                stored_name = str(meta.get("stored_name") or "")
+                if not old_id or not stored_name:
+                    continue
+                try:
+                    data = zf.read(f"files/{stored_name}")
+                except KeyError:
+                    continue
+                suffix = Path(stored_name).suffix.lower()
+                if not re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
+                    suffix = ""
+                nid = "u" + secrets.token_hex(8)
+                new_stored = nid + suffix
+                FILES_DIR.mkdir(parents=True, exist_ok=True)
+                (FILES_DIR / new_stored).write_bytes(data)
+                conn.execute(
+                    "INSERT INTO files (id, name, size, mime, stored_name, created_at) VALUES (?,?,?,?,?,?)",
+                    (
+                        nid,
+                        str(meta.get("name") or "未命名文件"),
+                        len(data),
+                        str(meta.get("mime") or ""),
+                        new_stored,
+                        now_iso(),
+                    ),
+                )
+                file_map[old_id] = nid
+                counts["files"] += 1
+
+            def remap_url(value: str) -> str:
+                def repl(match: re.Match[str]) -> str:
+                    return f"/api/files/{file_map.get(match.group(1), match.group(1))}"
+
+                return FILE_URL_RE.sub(repl, value)
+
+            for t in tasks:
+                nid = _uid("t")
+                old_pid = str(t.get("project_id") or "")
+                old_fid = str(t.get("folder_id") or "")
+                created = str(t.get("created_at") or now_iso())
+                completed = str(t.get("completed_at") or "")
+                try:
+                    images = json.loads(t.get("images") or "[]")
+                except (json.JSONDecodeError, TypeError):
+                    images = []
+                try:
+                    attachments = json.loads(t.get("attachments") or "[]")
+                except (json.JSONDecodeError, TypeError):
+                    attachments = []
+                images = [remap_url(str(item)) for item in images]
+                new_attachments = []
+                for item in attachments:
+                    if not isinstance(item, dict):
+                        continue
+                    entry = dict(item)
+                    old_file_id = str(entry.get("fileId") or "")
+                    if old_file_id in file_map:
+                        entry["fileId"] = file_map[old_file_id]
+                        entry["url"] = f"/api/files/{file_map[old_file_id]}"
+                    elif entry.get("url"):
+                        entry["url"] = remap_url(str(entry["url"]))
+                    new_attachments.append(entry)
+                conn.execute(
+                    """INSERT INTO tasks (id, title, project_id, folder_id, status, priority, plan_date, due_date,
+                       start_time, end_time, description, remark, images, attachments, need_review, sort, created_at, completed_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        nid,
+                        str(t.get("title") or "未命名事项"),
+                        pid_map.get(old_pid, ""),
+                        fid_map.get(old_fid, ""),
+                        "done" if t.get("status") == "done" else "todo",
+                        str(t.get("priority") or ""),
+                        str(t.get("plan_date") or ""),
+                        str(t.get("due_date") or ""),
+                        str(t.get("start_time") or ""),
+                        str(t.get("end_time") or ""),
+                        str(t.get("description") or ""),
+                        str(t.get("remark") or ""),
+                        json.dumps(images, ensure_ascii=False),
+                        json.dumps(new_attachments, ensure_ascii=False),
+                        int(bool(t.get("need_review"))),
+                        t_sort,
+                        created,
+                        completed,
+                    ),
+                )
+                t_sort += 1
+                counts["tasks"] += 1
+            conn.commit()
+        finally:
+            conn.close()
+    return counts

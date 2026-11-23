@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { createPortal } from 'react-dom'
 import type { Project, Task } from '../types'
-import { getDragPayload, monthCells, setDragPayload } from '../utils'
+import { getDragPayload, monthCells, projectColor, setDragPayload } from '../utils'
 
 interface Props {
   cursor: Date
@@ -137,32 +137,41 @@ export default function MonthView(props: Props) {
               </button>
               <div className="cards">
                 {planned.map((t) => (
-                  <button
+                  <div
                     key={t.id}
                     data-task-id={t.id}
                     className={
-                      'tcard g' +
-                      shadeOf(t.projectId) +
+                      'tcard' +
                       (t.status === 'done' ? ' done' : '') +
                       (props.focusId === t.id ? ' flash' : '')
                     }
+                    style={{ borderLeftColor: projectColor(shadeOf(t.projectId)) }}
                     draggable
-                    onDragStart={() => setDragPayload({ type: 'task', id: t.id })}
+                    onDragStart={(e) => {
+                      setDragPayload({ type: 'task', id: t.id })
+                      if (e.dataTransfer) {
+                        e.dataTransfer.effectAllowed = 'move'
+                        try {
+                          e.dataTransfer.setData('text/plain', t.id)
+                        } catch {
+                          /* ignore */
+                        }
+                      }
+                    }}
                     onDragEnd={() => setDragPayload(null)}
                     onClick={(e) => {
                       e.stopPropagation()
                       props.onOpen(t.id)
                     }}
                     onContextMenu={(e) => openMenu(e, { task: t })}
+                    role="button"
+                    tabIndex={0}
                   >
                     <div className="tcard-top">
-                      <span className="time">
-                        {t.start}
-                        {t.end ? '–' + t.end : ''}
-                      </span>
                       <span
-                        className={'cdot ' + t.status}
-                        style={{ marginLeft: 'auto' }}
+                        className={'tl-check tiny ' + t.status}
+                        role="checkbox"
+                        aria-checked={t.status === 'done'}
                         title={t.status === 'done' ? '标记为未处理' : '标记为已处理'}
                         onClick={(e) => {
                           e.stopPropagation()
@@ -171,12 +180,18 @@ export default function MonthView(props: Props) {
                       >
                         {t.status === 'done' ? '✓' : ''}
                       </span>
+                      <span className="ctitle">{t.title}</span>
+                      {t.start && (
+                        <span className="time">
+                          {t.start}
+                          {t.end ? '–' + t.end : ''}
+                        </span>
+                      )}
                     </div>
-                    <div className="ctitle">{t.title}</div>
-                  </button>
+                  </div>
                 ))}
                 {dueItems.map((t) => (
-                  <button
+                  <div
                     key={'due-' + t.id}
                     data-task-id={t.id}
                     className={'tcard due' + (props.focusId === t.id ? ' flash' : '')}
@@ -185,9 +200,11 @@ export default function MonthView(props: Props) {
                       props.onOpen(t.id)
                     }}
                     onContextMenu={(e) => openMenu(e, { task: t })}
+                    role="button"
+                    tabIndex={0}
                   >
                     <div className="ctitle">⏰ {t.title}</div>
-                  </button>
+                  </div>
                 ))}
               </div>
             </div>

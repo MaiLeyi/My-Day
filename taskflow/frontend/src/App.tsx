@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { api } from './api'
-import AiModal from './components/AiModal'
 import ConfirmDialog from './components/ConfirmDialog'
 import type { AskConfirmOptions } from './components/ConfirmDialog'
 import DayView from './components/DayView'
@@ -10,12 +9,12 @@ import ExportModal from './components/ExportModal'
 import FilterBar from './components/FilterBar'
 import ListView from './components/ListView'
 import MonthView from './components/MonthView'
+import ProjectModal from './components/ProjectModal'
 import PromptModal from './components/PromptModal'
 import SettingsModal from './components/SettingsModal'
 import Sidebar from './components/Sidebar'
 import WeekView from './components/WeekView'
 import type {
-  AiContext,
   Bootstrap,
   Priority,
   Scope,
@@ -36,7 +35,7 @@ type ConfirmState = AskConfirmOptions | null
 
 const newDraft = (projects: Bootstrap['projects'], opts: { projectId?: string; folderId?: string; planDate?: string; start?: string; end?: string }): TaskDraft => ({
   title: '',
-  projectId: opts.projectId || projects[0]?.id || '',
+  projectId: opts.projectId !== undefined ? opts.projectId : projects[0]?.id || '',
   folderId: opts.folderId || '',
   status: 'todo',
   priority: '',
@@ -171,11 +170,10 @@ export default function App() {
   const [detail, setDetail] = useState<DetailState>(null)
   const [focusId, setFocusId] = useState('')
   const focusTimer = useRef<number | undefined>(undefined)
-  const [projPrompt, setProjPrompt] = useState(false)
+  const [projectModal, setProjectModal] = useState<{ projectId?: string } | null>(null)
   const [folderPromptProject, setFolderPromptProject] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [aiCtx, setAiCtx] = useState<AiContext | null>(null)
   const [previewTheme, setPreviewTheme] = useState<Theme | null>(null)
   const [confirm, setConfirm] = useState<ConfirmState>(null)
 
@@ -225,7 +223,6 @@ export default function App() {
 
   const { projects, folders, tasks, settings } = data
   const archivedIds = new Set(projects.filter((p) => p.archived).map((p) => p.id))
-  const aiReady = !!settings.ai.apiKey.trim()
   const q = query.trim().toLowerCase()
 
   const inScope = (t: Task) =>
@@ -304,7 +301,8 @@ export default function App() {
       const folder = folders.find((f) => f.id === scope.id)
       openNew({ projectId: folder?.projectId, folderId: scope.id })
     } else {
-      openNew()
+      // 全部事项：默认落到「未分组」（不预选项目）
+      openNew({ projectId: '' })
     }
   }
 
@@ -337,16 +335,26 @@ export default function App() {
 
   const handleTreeReorder = async (src: DragPayload, targetType: 'project' | 'folder', targetId: string) => {
     try {
-      if (src.type === 'project' && targetType === 'project') {
+      if (src.type === 'task') {
+        // 事项拖到项目：归入该项目未分组；拖到分组：连同项目一起移动
+        if (targetType === 'project') {
+          await api.moveTask(src.id, targetId, '')
+        } else {
+          const folder = folders.find((f) => f.id === targetId)
+          if (!folder) return
+          await api.moveTask(src.id, folder.projectId, folder.id)
+        }
+        await reload('已移动事项')
+      } else if (src.type === 'project' && targetType === 'project') {
         await api.reorder('project', src.id, targetId)
+        await reload('已调整')
       } else if (src.type === 'folder' && targetType === 'folder') {
         await api.reorder('folder', src.id, targetId)
+        await reload('已调整')
       } else if (src.type === 'folder' && targetType === 'project') {
         await api.updateFolder(src.id, { projectId: targetId })
-      } else {
-        return
+        await reload('已调整')
       }
-      await reload('已调整')
     } catch (err) {
       showToast((err as Error).message)
     }
@@ -540,14 +548,6 @@ export default function App() {
     })
   }
 
-  const openAi = (ctx: AiContext) => {
-    if (!aiReady) {
-      showToast('请先在左下角设置中配置 AI API Key')
-      return
-    }
-    setAiCtx(ctx)
-  }
-
   const addOnDay = (iso: string) => openNew({ planDate: iso })
   const addOnDayAt = (iso: string, start: string, end: string) => openNew({ planDate: iso, start, end })
 
@@ -574,15 +574,14 @@ export default function App() {
             scope={scope}
             query={query}
             batchMode={batchMode}
-            aiReady={aiReady}
             selected={selected}
             onQuery={setQuery}
             onSelectScope={selectScope}
             onToggleSelect={toggleSel}
-            onNewProject={() => setProjPrompt(true)}
+            onNewProject={() => setProjectModal({})}
+            onEditProject={(projectId) => setProjectModal({ projectId })}
             onNewFolder={(projectId) => setFolderPromptProject(projectId)}
             onNewTask={(projectId, folderId) => openNew({ projectId, folderId })}
-            onAi={openAi}
             onArchive={archiveProject}
             onUnarchive={unarchiveProject}
             onDeleteProject={deleteProject}
@@ -712,6 +711,7 @@ export default function App() {
                 batchMode={batchMode}
                 selected={selected}
                 onDateChange={setDayDate}
+                onAddDay={addOnDay}
                 onAddAt={addOnDayAt}
                 focusId={focusId}
                 onScheduleRange={updateTaskTime}
@@ -739,18 +739,20 @@ export default function App() {
         </main>
       </div>
 
-      {projPrompt && (
-        <PromptModal
-          title="新建项目"
-          label="项目名称"
-          placeholder="给项目起个名字"
-          onClose={() => setProjPrompt(false)}
+      {projectModal && (
+        <ProjectModal
+          project={projectModal.projectId ? projects.find((p) => p.id === projectModal.projectId) || null : null}
+          onClose={() => setProjectModal(null)}
           onToast={showToast}
-          onConfirm={async (name) => {
+          onSubmit={async (name, shade) => {
             try {
-              await api.createProject(name)
-              setProjPrompt(false)
-              await reload('已新建项目')
+              if (projectModal.projectId) {
+                await api.updateProject(projectModal.projectId, { name, shade })
+              } else {
+                await api.createProject(name, shade)
+              }
+              setProjectModal(null)
+              await reload(projectModal.projectId ? '已更新项目' : '已新建项目')
             } catch (err) {
               showToast((err as Error).message)
             }
@@ -782,11 +784,6 @@ export default function App() {
           tasks={tasks}
           projects={projects}
           folders={folders}
-          scope={scope}
-          query={query}
-          dateFilter={dateFilter}
-          statusFilter={statusFilter}
-          selected={selected}
           onClose={() => setExportOpen(false)}
           onToast={showToast}
         />
@@ -798,17 +795,7 @@ export default function App() {
           onClose={() => setSettingsOpen(false)}
           onSaved={(next: Settings) => setData((prev) => (prev ? { ...prev, settings: next } : prev))}
           onPreviewTheme={setPreviewTheme}
-          onToast={showToast}
-        />
-      )}
-
-      {aiCtx && (
-        <AiModal
-          ctx={aiCtx}
-          projects={projects}
-          folders={folders}
-          onClose={() => setAiCtx(null)}
-          onCreated={reload}
+          onImported={reload}
           onToast={showToast}
         />
       )}

@@ -75,7 +75,17 @@ export default function TaskRow(props: Props) {
         (props.leaving ? ' leaving' : '')
       }
       draggable={!props.batchMode}
-      onDragStart={() => setDragPayload({ type: 'task', id: task.id })}
+      onDragStart={(e) => {
+        setDragPayload({ type: 'task', id: task.id })
+        if (e.dataTransfer) {
+          e.dataTransfer.effectAllowed = 'move'
+          try {
+            e.dataTransfer.setData('text/plain', task.id)
+          } catch {
+            /* ignore */
+          }
+        }
+      }}
       onDragEnd={() => setDragPayload(null)}
       onDragOver={(e) => {
         if (props.onDropTask && getDragPayload()?.type === 'task') {

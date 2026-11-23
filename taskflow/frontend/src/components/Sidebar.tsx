@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { DragEvent as ReactDragEvent, MouseEvent as ReactMouseEvent } from 'react'
-import type { AiContext, Folder, Project, Scope, Task } from '../types'
+import type { Folder, Project, Scope, Task } from '../types'
 import type { DragPayload } from '../utils'
-import { getDragPayload, setDragPayload, taskStats } from '../utils'
+import { getDragPayload, projectColor, setDragPayload, taskStats } from '../utils'
 
 const MIN_W = 180
 const MAX_W = 460
@@ -16,15 +16,14 @@ interface Props {
   scope: Scope | null
   query: string
   batchMode: boolean
-  aiReady: boolean
   selected: Set<string>
   onQuery: (value: string) => void
   onSelectScope: (scope: Scope | null) => void
   onToggleSelect: (type: 'p' | 'f', id: string) => void
   onNewProject: () => void
+  onEditProject: (projectId: string) => void
   onNewFolder: (projectId: string) => void
   onNewTask: (projectId: string, folderId?: string) => void
-  onAi: (ctx: AiContext) => void
   onArchive: (id: string) => void
   onUnarchive: (id: string) => void
   onDeleteProject: (id: string) => void
@@ -105,7 +104,7 @@ export default function Sidebar(props: Props) {
     const rect = el.getBoundingClientRect()
     setMenu({
       projectId,
-      top: Math.min(rect.bottom + 4, window.innerHeight - 100),
+      top: Math.min(rect.bottom + 4, window.innerHeight - 120),
       left: Math.min(rect.left, window.innerWidth - 170),
     })
   }
@@ -126,6 +125,19 @@ export default function Sidebar(props: Props) {
     if (src) props.onReorder(src, type, id)
   }
 
+  /** 让拖拽在 Electron / 浏览器中都稳定生效。 */
+  const beginDrag = (event: ReactDragEvent, payload: DragPayload) => {
+    setDragPayload(payload)
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move'
+      try {
+        event.dataTransfer.setData('text/plain', payload.type)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
   const activeProjects = props.projects.filter((p) => !p.archived)
   const archived = props.projects.filter((p) => p.archived)
   const archivedIds = new Set(archived.map((p) => p.id))
@@ -142,13 +154,7 @@ export default function Sidebar(props: Props) {
 
   return (
     <aside ref={asideRef} className="sidebar group-sidebar" style={{ ['--side-w' as string]: `${sideW}px` }}>
-      <div className="groups-head">
-        <span className="groups-title">分组</span>
-        <button className="mini" title="新建项目" onClick={props.onNewProject}>
-          ＋
-        </button>
-      </div>
-      <label className="group-search">
+      <label className="group-search" style={{ marginTop: 14 }}>
         <span>⌕</span>
         <input
           value={props.query}
@@ -190,7 +196,7 @@ export default function Sidebar(props: Props) {
                 draggable={!props.batchMode}
                 onDragStart={(e) => {
                   if (!guardDrag(e)) return
-                  setDragPayload({ type: 'project', id: p.id })
+                  beginDrag(e, { type: 'project', id: p.id })
                 }}
                 onDragEnd={() => setDragPayload(null)}
                 onDragOver={(e) => {
@@ -200,11 +206,12 @@ export default function Sidebar(props: Props) {
                 onDragLeave={() => setDragOver('')}
                 onDrop={(e) => drop(e, 'project', p.id)}
                 onClick={(e) => {
-                  if ((e.target as HTMLElement).closest('button,input')) return
-                  if ((e.target as HTMLElement).closest('.caret')) {
+                  const target = e.target as HTMLElement
+                  if (target.closest('.caret')) {
                     toggleCollapse(p.id)
                     return
                   }
+                  if (target.closest('button,input')) return
                   props.onSelectScope({ type: 'project', id: p.id })
                 }}
               >
@@ -217,8 +224,10 @@ export default function Sidebar(props: Props) {
                     onClick={(e) => e.stopPropagation()}
                   />
                 )}
-                <button className="caret">▶</button>
-                <span className={'dot shade-' + (p.shade ?? 0)} />
+                <button className="caret" title={isOpen ? '收起' : '展开'}>
+                  ▶
+                </button>
+                <span className="dot" style={{ background: projectColor(p.shade) }} />
                 <span className="pname">
                   {p.name}({projectStats.pending}/{projectStats.total})
                 </span>
@@ -234,14 +243,14 @@ export default function Sidebar(props: Props) {
                     ＋
                   </button>
                   <button
-                    className={'mini' + (props.aiReady ? '' : ' ai-off')}
-                    title="AI 拆分此项目"
+                    className="mini"
+                    title="编辑项目名称与颜色"
                     onClick={(e) => {
                       e.stopPropagation()
-                      props.onAi({ projectId: p.id, folderId: '', projectSplit: true })
+                      props.onEditProject(p.id)
                     }}
                   >
-                    ✂
+                    ✎
                   </button>
                   <button
                     className="mini"
@@ -279,7 +288,7 @@ export default function Sidebar(props: Props) {
                         draggable={!props.batchMode}
                         onDragStart={(e) => {
                           if (!guardDrag(e)) return
-                          setDragPayload({ type: 'folder', id: f.id })
+                          beginDrag(e, { type: 'folder', id: f.id })
                         }}
                         onDragEnd={() => setDragPayload(null)}
                         onDragOver={(e) => {
@@ -309,26 +318,6 @@ export default function Sidebar(props: Props) {
                           {f.name}({folderStats.pending}/{folderStats.total})
                         </span>
                         <span className="row-actions">
-                          <button
-                            className="mini"
-                            title="在此分组下新建事项"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              props.onNewTask(f.projectId, f.id)
-                            }}
-                          >
-                            ＋
-                          </button>
-                          <button
-                            className={'mini' + (props.aiReady ? '' : ' ai-off')}
-                            title="AI 拆分到本分组"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              props.onAi({ projectId: f.projectId, folderId: f.id, projectSplit: false })
-                            }}
-                          >
-                            ✂
-                          </button>
                           <button
                             className="mini"
                             title="删除分组"
@@ -402,6 +391,15 @@ export default function Sidebar(props: Props) {
                 }}
               >
                 新建事项
+              </button>
+              <button
+                onClick={() => {
+                  const projectId = menu.projectId
+                  setMenu(null)
+                  props.onEditProject(projectId)
+                }}
+              >
+                编辑项目
               </button>
             </div>
           </>,

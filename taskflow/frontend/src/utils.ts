@@ -4,6 +4,25 @@ export const STATUS: Record<Status, string> = { todo: '未处理', done: '已处
 export const PRIORITY_LABEL: Record<string, string> = { high: '高', mid: '中', low: '低', '': '无' }
 export const PRIORITY_RANK: Record<string, number> = { high: 0, mid: 1, low: 2, '': 3 }
 
+/** 项目可选颜色，shade 为数组下标。 */
+export const PROJECT_COLORS = [
+  '#7c8b74',
+  '#7b8497',
+  '#a08a72',
+  '#6f8fa8',
+  '#9b7f9e',
+  '#8a9a5b',
+  '#b0826a',
+  '#5f8c8c',
+  '#a86f6f',
+  '#8e8a6f',
+]
+
+export function projectColor(shade: number | undefined): string {
+  if (typeof shade !== 'number' || shade < 0) return PROJECT_COLORS[0]
+  return PROJECT_COLORS[shade % PROJECT_COLORS.length]
+}
+
 export function fmt(d: Date): string {
   const y = d.getFullYear()
   const m = String(d.getMonth() + 1).padStart(2, '0')

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { Folder, Project, Task } from '../types'
-import { PRIORITY_RANK, byDate } from '../utils'
+import { PRIORITY_RANK, byDate, projectColor } from '../utils'
 import TaskRow from './TaskRow'
 
 interface Props {
@@ -103,7 +103,10 @@ export default function ListView(props: Props) {
           <div key={pid} className={'grp' + (isOpen ? ' open' : '')}>
             <div className="grp-head" onClick={() => toggle(pid)}>
               <span className="caret">▶</span>
-              <span className={'grp-icon shade-' + (project?.shade ?? 0)}>
+              <span
+                className="grp-icon"
+                style={{ background: projectColor(project?.shade) }}
+              >
                 {(project?.name || '未').charAt(0)}
               </span>
               <span className="grp-name">{project?.name || '未归类'}</span>
