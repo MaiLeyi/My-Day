@@ -112,6 +112,7 @@ export default function DayView(props: Props) {
       return { task: t, start, end: end > start ? end : start + DEFAULT_DURATION }
     })
   const timed = markConflicts(timedSource)
+  const starts = new Set(timed.map((i) => i.start))
   const untimed = dayTasks.filter((t) => !(t.planDate === props.date && t.start))
 
   useEffect(() => {
@@ -371,6 +372,7 @@ export default function DayView(props: Props) {
                   className={
                     'tl-chip pri-' + (t.priority || 'none') + (props.focusId === t.id ? ' flash' : '')
                   }
+                  style={{ ['--ev-c' as string]: projectColor(project?.shade) }}
                   draggable={!props.batchMode}
                   onDragStart={(e) => beginTaskDrag(e, t.id)}
                   onDragEnd={() => setDragPayload(null)}
@@ -379,25 +381,28 @@ export default function DayView(props: Props) {
                   title="拖到右侧时间轴安排时间"
                 >
                   <div className="tl-chip-main">
-                    <div className="tl-chip-title">{t.title}</div>
+                    <div className="tl-chip-head">
+                      <button
+                        className={'tl-check small ' + t.status}
+                        title={t.status === 'done' ? '标记为未处理' : '标记为已处理'}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          props.onToggleStatus(t)
+                        }}
+                      >
+                        {t.status === 'done' ? '✓' : ''}
+                      </button>
+                      <div className="tl-chip-title">{t.title}</div>
+                    </div>
+                    <div className="tl-chip-time">
+                      {t.start ? t.start + (t.end ? ' – ' + t.end : '') : '未排期'}
+                    </div>
                     <div className="tl-chip-meta">
                       <span>{project?.name || '未归类'}</span>
                       {t.dueDate === props.date && t.planDate !== props.date && <span className="tl-due">当日截止</span>}
                       {t.priority && <span>· {PRIORITY_LABEL[t.priority]}优先级</span>}
                     </div>
                   </div>
-                  <span className="tl-chip-actions">
-                    <button
-                      className={'tl-check small ' + t.status}
-                      title={t.status === 'done' ? '标记为未处理' : '标记为已处理'}
-                      onClick={(e) => {
-                        e.stopPropagation()
-                        props.onToggleStatus(t)
-                      }}
-                    >
-                      {t.status === 'done' ? '✓' : ''}
-                    </button>
-                  </span>
                 </div>
               )
             })}
@@ -452,7 +457,12 @@ export default function DayView(props: Props) {
               const start = preview ? preview.previewStart : item.start
               const end = preview ? preview.previewEnd : item.end
               const top = (start / 60) * HOUR_HEIGHT
-              const height = Math.max(MIN_EVENT_HEIGHT, ((end - start) / 60) * HOUR_HEIGHT)
+              // 下一个事项恰好从本事项结束时刻开始时，贴在一起不留空
+              const touchBelow = starts.has(end)
+              const height = Math.max(
+                MIN_EVENT_HEIGHT,
+                ((end - start) / 60) * HOUR_HEIGHT - (touchBelow ? 0 : 6),
+              )
               const project = props.projects.find((p) => p.id === item.task.projectId)
               return (
                 <div

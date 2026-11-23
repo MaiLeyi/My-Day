@@ -363,6 +363,7 @@ export default function WeekView(props: Props) {
                   return { task: t, start, end: end > start ? end : start + DEFAULT_DURATION }
                 })
               const timed = markConflicts(timedSource)
+              const starts = new Set(timed.map((i) => i.start))
               return (
                 <div
                   key={day.iso}
@@ -414,7 +415,12 @@ export default function WeekView(props: Props) {
                     const start = preview ? preview.previewStart : item.start
                     const end = preview ? preview.previewEnd : item.end
                     const top = (start / 60) * HOUR_HEIGHT
-                    const height = Math.max((MIN_DURATION / 60) * HOUR_HEIGHT, ((end - start) / 60) * HOUR_HEIGHT)
+                    // 下一个事项恰好从本事项结束时刻开始时，贴在一起不留空
+                    const touchBelow = starts.has(end)
+                    const height = Math.max(
+                      (MIN_DURATION / 60) * HOUR_HEIGHT,
+                      ((end - start) / 60) * HOUR_HEIGHT - (touchBelow ? 0 : 6),
+                    )
                     const project = props.projects.find((p) => p.id === item.task.projectId)
                     return (
                       <div

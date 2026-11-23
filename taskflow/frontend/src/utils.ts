@@ -4,8 +4,9 @@ export const STATUS: Record<Status, string> = { todo: '未处理', done: '已处
 export const PRIORITY_LABEL: Record<string, string> = { high: '高', mid: '中', low: '低', '': '无' }
 export const PRIORITY_RANK: Record<string, number> = { high: 0, mid: 1, low: 2, '': 3 }
 
-/** 项目可选颜色，shade 为数组下标。 */
+/** 项目可选颜色，shade 为数组下标。前 10 个为低饱和色，后 10 个为对应的明亮色。 */
 export const PROJECT_COLORS = [
+  // 低饱和
   '#7c8b74',
   '#7b8497',
   '#a08a72',
@@ -16,6 +17,17 @@ export const PROJECT_COLORS = [
   '#5f8c8c',
   '#a86f6f',
   '#8e8a6f',
+  // 明亮
+  '#5cb870',
+  '#6a8ef0',
+  '#f0a050',
+  '#4aa8e0',
+  '#b07fe0',
+  '#a3c644',
+  '#f0826a',
+  '#3fbdb0',
+  '#e86a6a',
+  '#e0b84a',
 ]
 
 export function projectColor(shade: number | undefined): string {
