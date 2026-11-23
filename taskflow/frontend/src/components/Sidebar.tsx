@@ -7,16 +7,18 @@ import { getDragPayload, setDragPayload, taskStats } from '../utils'
 
 const MIN_W = 180
 const MAX_W = 460
-const DEFAULT_W = 290
+const DEFAULT_W = 268
 
 interface Props {
   projects: Project[]
   folders: Folder[]
   tasks: Task[]
   scope: Scope | null
+  query: string
   batchMode: boolean
   aiReady: boolean
   selected: Set<string>
+  onQuery: (value: string) => void
   onSelectScope: (scope: Scope | null) => void
   onToggleSelect: (type: 'p' | 'f', id: string) => void
   onNewProject: () => void
@@ -28,8 +30,9 @@ interface Props {
   onDeleteProject: (id: string) => void
   onDeleteFolder: (id: string) => void
   onReorder: (src: DragPayload, targetType: 'project' | 'folder', targetId: string) => void
-  onOpenSettings: () => void
   onToggleBatch: () => void
+  onBatchDelete: () => void
+  onCancelBatch: () => void
   onExport: () => void
 }
 
@@ -138,18 +141,31 @@ export default function Sidebar(props: Props) {
   }
 
   return (
-    <aside ref={asideRef} className="sidebar" style={{ ['--side-w' as string]: `${sideW}px` }}>
-      <div className="side-tools">
-        <button className="btn btn-ghost" onClick={props.onToggleBatch}>
-          ☑ 选择
-        </button>
-        <button className="btn btn-ghost" onClick={props.onExport}>
-          导出
-        </button>
-        <button className="btn btn-ghost" onClick={props.onNewProject}>
-          ＋ 新建项目
+    <aside ref={asideRef} className="sidebar group-sidebar" style={{ ['--side-w' as string]: `${sideW}px` }}>
+      <div className="groups-head">
+        <span className="groups-title">分组</span>
+        <button className="mini" title="新建项目" onClick={props.onNewProject}>
+          ＋
         </button>
       </div>
+      <label className="group-search">
+        <span>⌕</span>
+        <input
+          value={props.query}
+          onChange={(e) => props.onQuery(e.target.value)}
+          placeholder="搜索事项"
+          aria-label="搜索事项"
+        />
+      </label>
+      {props.batchMode && (
+        <div className="side-batch">
+          <span>
+            已选 <b>{props.selected.size}</b> 项
+          </span>
+          <button onClick={props.onBatchDelete}>删除</button>
+          <button onClick={props.onCancelBatch}>取消</button>
+        </div>
+      )}
       <div className="tree">
         <div
           className={'row all-row' + (props.scope === null ? ' active' : '')}
@@ -202,7 +218,7 @@ export default function Sidebar(props: Props) {
                   />
                 )}
                 <button className="caret">▶</button>
-                <span className="dot" />
+                <span className={'dot shade-' + (p.shade ?? 0)} />
                 <span className="pname">
                   {p.name}({projectStats.pending}/{projectStats.total})
                 </span>
@@ -286,7 +302,9 @@ export default function Sidebar(props: Props) {
                             onClick={(e) => e.stopPropagation()}
                           />
                         )}
-                        <span className="f-icon">–</span>
+                        <svg className="folder-icon" viewBox="0 0 24 24" aria-hidden="true">
+                          <path d="M3 7a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+                        </svg>
                         <span style={{ flex: 1 }}>
                           {f.name}({folderStats.pending}/{folderStats.total})
                         </span>
@@ -352,9 +370,13 @@ export default function Sidebar(props: Props) {
         )}
       </div>
 
-      <button className="add-proj side-foot" onClick={props.onOpenSettings}>
-        ⚙ 设置
+      <button className="add-proj" onClick={props.onNewProject}>
+        ＋ 新建项目
       </button>
+      <div className="side-foot">
+        <button onClick={props.onToggleBatch}>☑ 选择</button>
+        <button onClick={props.onExport}>⇩ 导出</button>
+      </div>
 
       <div className="sidebar-resizer" onMouseDown={startResize} title="拖动调整侧边栏宽度" />
 

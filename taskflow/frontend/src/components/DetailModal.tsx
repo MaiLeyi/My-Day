@@ -1,9 +1,8 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Attachment, Folder, Project, Task, TaskDraft, TaskInput } from '../types'
 import { api } from '../api'
 import DateField from './DateField'
 import Lightbox from './Lightbox'
-import Modal from './Modal'
 import Select from './Select'
 
 interface Props {
@@ -58,6 +57,14 @@ export default function DetailModal(props: Props) {
   const patchDraft = (patch: Partial<TaskDraft>) => setDraft((prev) => ({ ...prev, ...patch }))
 
   const close = () => props.onClose()
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') props.onClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [props.onClose])
 
   const validate = (): boolean => {
     const next: { title?: string; time?: string } = {}
@@ -163,13 +170,16 @@ export default function DetailModal(props: Props) {
 
   return (
     <>
-      <Modal size="md" onClose={close}>
+      <div className="drawer-layer">
+        <div className="drawer-scrim" onMouseDown={close} />
+        <section className="detail-drawer" role="dialog" aria-modal="true" aria-label={draft.id ? '编辑事项' : '新建事项'}>
         <div className="d-head">
           <h3>{draft.id ? '编辑事项' : '新建事项'}</h3>
-          <button className="d-close" onClick={close}>
+          <button className="d-close" onClick={close} aria-label="关闭">
             ×
           </button>
         </div>
+        <div className="drawer-body">
         {!draft.id && (
           <div className="place-hint">
             将存入：{project?.name || '未归类'}
@@ -359,6 +369,7 @@ export default function DetailModal(props: Props) {
             />
           </div>
         )}
+        </div>
         <div className="d-foot">
           <button className="btn btn-ghost" onClick={close}>
             取消
@@ -367,7 +378,8 @@ export default function DetailModal(props: Props) {
             {saving ? '保存中…' : uploading ? '上传中…' : '保存'}
           </button>
         </div>
-      </Modal>
+        </section>
+      </div>
       {lightbox !== null && (
         <Lightbox
           images={draft.images}

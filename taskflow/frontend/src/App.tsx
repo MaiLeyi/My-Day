@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { api } from './api'
 import AiModal from './components/AiModal'
 import ConfirmDialog from './components/ConfirmDialog'
@@ -12,7 +13,6 @@ import MonthView from './components/MonthView'
 import PromptModal from './components/PromptModal'
 import SettingsModal from './components/SettingsModal'
 import Sidebar from './components/Sidebar'
-import TopBar from './components/TopBar'
 import WeekView from './components/WeekView'
 import type {
   AiContext,
@@ -50,6 +50,80 @@ const newDraft = (projects: Bootstrap['projects'], opts: { projectId?: string; f
   attachments: [],
   needReview: false,
 })
+
+const NAV_ITEMS: { key: View; label: string; icon: ReactNode }[] = [
+  {
+    key: 'list',
+    label: '清单',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="4" y="4" width="16" height="16" rx="3" />
+        <path d="M8 9h8M8 13h8M8 17h5" />
+      </svg>
+    ),
+  },
+  {
+    key: 'month',
+    label: '日历',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3" y="5" width="18" height="16" rx="3" />
+        <path d="M7 3v4M17 3v4M3 10h18M8 14h2M14 14h2M8 17h2" />
+      </svg>
+    ),
+  },
+  {
+    key: 'week',
+    label: '本周',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3" y="4" width="18" height="17" rx="3" />
+        <path d="M8 8v9M12 8v9M16 8v9" />
+      </svg>
+    ),
+  },
+  {
+    key: 'day',
+    label: '日程',
+    icon: (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="12" cy="12" r="9" />
+        <path d="M12 7v5l3 2" />
+      </svg>
+    ),
+  },
+]
+
+function ViewRail(props: { view: View; onChangeView: (view: View) => void; onOpenSettings: () => void }) {
+  return (
+    <nav className="view-rail" aria-label="工作台视图">
+      <div className="rail-avatar" title="我过一天">
+        我
+      </div>
+      <div className="rail-nav">
+        {NAV_ITEMS.map((item) => (
+          <button
+            key={item.key}
+            className={'rail-item' + (props.view === item.key ? ' active' : '')}
+            onClick={() => props.onChangeView(item.key)}
+          >
+            <span className="rail-icon">{item.icon}</span>
+            <span>{item.label}</span>
+          </button>
+        ))}
+      </div>
+      <button className="rail-item rail-settings" title="设置" onClick={props.onOpenSettings}>
+        <span className="rail-icon">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.09A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.6-1H3v-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6V3h4v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.6 1h.09v4H21a1.7 1.7 0 0 0-1.6 1Z" />
+          </svg>
+        </span>
+        <span>设置</span>
+      </button>
+    </nav>
+  )
+}
 
 export default function App() {
   const [data, setData] = useState<Bootstrap | null>(null)
@@ -211,6 +285,28 @@ export default function App() {
   }
 
   const openTask = (id: string) => setDetail({ taskId: id })
+
+  const changeView = (next: View) => {
+    if (next !== view) setQuery('')
+    setView(next)
+    setDetail(null)
+    setNavOpen(false)
+    if (next !== 'list') {
+      setBatchMode(false)
+      setSelected(new Set())
+    }
+  }
+
+  const openNewInScope = () => {
+    if (scope?.type === 'project') {
+      openNew({ projectId: scope.id })
+    } else if (scope?.type === 'folder') {
+      const folder = folders.find((f) => f.id === scope.id)
+      openNew({ projectId: folder?.projectId, folderId: scope.id })
+    } else {
+      openNew()
+    }
+  }
 
   /** 新建成功后高亮并滚动到新事项，避免"保存了却看不见"。 */
   const focusTask = (task: Task) => {
@@ -464,56 +560,56 @@ export default function App() {
     }
   }
 
-  const viewTitle = view === 'list' ? '清单' : view === 'week' ? '本周' : view === 'day' ? '日程' : '日历'
+  const viewTitle = view === 'list' ? '全部事项' : view === 'week' ? '本周' : view === 'day' ? '日程' : '日历'
 
   return (
     <div className={'app' + (batchMode ? ' batch' : '') + (navOpen ? ' nav-open' : '')}>
-      <TopBar
-        view={view}
-        query={query}
-        batchMode={batchMode}
-        selectedCount={selected.size}
-        onChangeView={setView}
-        onQuery={setQuery}
-        onToggleNav={() => setNavOpen((v) => !v)}
-        onBatchDelete={batchDelete}
-        onCancelBatch={() => {
-          setBatchMode(false)
-          setSelected(new Set())
-        }}
-      />
       <div className="layout">
-        <Sidebar
-          projects={projects}
-          folders={folders}
-          tasks={tasks}
-          scope={scope}
-          batchMode={batchMode}
-          aiReady={aiReady}
-          selected={selected}
-          onSelectScope={selectScope}
-          onToggleSelect={toggleSel}
-          onNewProject={() => setProjPrompt(true)}
-          onNewFolder={(projectId) => setFolderPromptProject(projectId)}
-          onNewTask={(projectId, folderId) => openNew({ projectId, folderId })}
-          onAi={openAi}
-          onArchive={archiveProject}
-          onUnarchive={unarchiveProject}
-          onDeleteProject={deleteProject}
-          onDeleteFolder={deleteFolder}
-          onReorder={handleTreeReorder}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onToggleBatch={() => {
-            setBatchMode((v) => !v)
-            setSelected(new Set())
-          }}
-          onExport={() => setExportOpen(true)}
-        />
+        <ViewRail view={view} onChangeView={changeView} onOpenSettings={() => setSettingsOpen(true)} />
+        {view === 'list' && (
+          <Sidebar
+            projects={projects}
+            folders={folders}
+            tasks={tasks}
+            scope={scope}
+            query={query}
+            batchMode={batchMode}
+            aiReady={aiReady}
+            selected={selected}
+            onQuery={setQuery}
+            onSelectScope={selectScope}
+            onToggleSelect={toggleSel}
+            onNewProject={() => setProjPrompt(true)}
+            onNewFolder={(projectId) => setFolderPromptProject(projectId)}
+            onNewTask={(projectId, folderId) => openNew({ projectId, folderId })}
+            onAi={openAi}
+            onArchive={archiveProject}
+            onUnarchive={unarchiveProject}
+            onDeleteProject={deleteProject}
+            onDeleteFolder={deleteFolder}
+            onReorder={handleTreeReorder}
+            onToggleBatch={() => {
+              setBatchMode((v) => !v)
+              setSelected(new Set())
+            }}
+            onBatchDelete={batchDelete}
+            onCancelBatch={() => {
+              setBatchMode(false)
+              setSelected(new Set())
+            }}
+            onExport={() => setExportOpen(true)}
+          />
+        )}
 
         <main className="main">
           <div className="main-inner">
             {view !== 'month' && (
               <div className="main-head">
+                {view === 'list' && (
+                  <button className="menu-btn" title="打开分组" onClick={() => setNavOpen((v) => !v)}>
+                    ☰
+                  </button>
+                )}
                 <h2>{viewTitle}</h2>
                 {scope && (
                   <button className="scope-tag" onClick={() => selectScope(null)}>
@@ -522,21 +618,26 @@ export default function App() {
                 )}
                 <div className="spacer" />
                 {view === 'list' && (
-                  <FilterBar
-                    statusFilter={statusFilter}
-                    showDone={showDone}
-                    dateFilter={dateFilter}
-                    priorityFilter={priorityFilter}
-                    overdueOnly={overdueOnly}
-                    prioritySort={prioritySort}
-                    onStatusFilter={setStatusFilter}
-                    onShowDone={setShowDone}
-                    onDateFilter={setDateFilter}
-                    onPriorityFilter={setPriorityFilter}
-                    onOverdueOnly={setOverdueOnly}
-                    onPrioritySort={setPrioritySort}
-                    onReset={resetFilters}
-                  />
+                  <>
+                    <FilterBar
+                      statusFilter={statusFilter}
+                      showDone={showDone}
+                      dateFilter={dateFilter}
+                      priorityFilter={priorityFilter}
+                      overdueOnly={overdueOnly}
+                      prioritySort={prioritySort}
+                      onStatusFilter={setStatusFilter}
+                      onShowDone={setShowDone}
+                      onDateFilter={setDateFilter}
+                      onPriorityFilter={setPriorityFilter}
+                      onOverdueOnly={setOverdueOnly}
+                      onPrioritySort={setPrioritySort}
+                      onReset={resetFilters}
+                    />
+                    <button className="btn btn-pri new-task-main" onClick={openNewInScope}>
+                      ＋ 新建事项
+                    </button>
+                  </>
                 )}
               </div>
             )}
@@ -622,22 +723,21 @@ export default function App() {
               />
             )}
           </div>
+          {detail && (detail.taskId ? detailTask : true) && (
+            <DetailModal
+              key={detail.taskId || 'new'}
+              task={detailTask}
+              draft={detail.draft}
+              projects={projects}
+              folders={folders}
+              onClose={() => setDetail(null)}
+              onChanged={reload}
+              onSaved={focusTask}
+              onToast={showToast}
+            />
+          )}
         </main>
       </div>
-
-      {detail && (detail.taskId ? detailTask : true) && (
-        <DetailModal
-          key={detail.taskId || 'new'}
-          task={detailTask}
-          draft={detail.draft}
-          projects={projects}
-          folders={folders}
-          onClose={() => setDetail(null)}
-          onChanged={reload}
-          onSaved={focusTask}
-          onToast={showToast}
-        />
-      )}
 
       {projPrompt && (
         <PromptModal
